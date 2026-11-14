@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Clock, 
-  Video, 
-  ShieldAlert, 
-  Send, 
-  CheckCircle, 
-  User, 
-  Briefcase, 
+import {
+  Clock,
+  Video,
+  ShieldAlert,
+  Send,
+  CheckCircle,
+  User,
+  Briefcase,
   HelpCircle,
   Eye,
   CameraOff,
@@ -15,83 +15,114 @@ import {
   AlertCircle,
   ArrowRight,
   Loader2,
-  TrendingUp
+  TrendingUp,
+  Zap,
 } from 'lucide-react';
 import {
   fetchQuestionsByRole,
   submitAnswerForEvaluation,
+  requestNextQuestion,
   getInterviewSessionKey,
   readInterviewAnswers,
-  saveInterviewAnswer
+  saveInterviewAnswer,
 } from '../services/api';
 
-const TOTAL_DURATION_SECONDS = 30 * 60; // 30 minutes
+const TOTAL_DURATION_SECONDS = 30 * 60;
+const TOTAL_QUESTIONS = 5;
+
+const DIFFICULTY_STYLES = {
+  Easy:   { bg: 'bg-emerald-500/10', border: 'border-emerald-500/20', text: 'text-emerald-400' },
+  Medium: { bg: 'bg-amber-500/10',   border: 'border-amber-500/20',   text: 'text-amber-400'   },
+  Hard:   { bg: 'bg-rose-500/10',    border: 'border-rose-500/20',    text: 'text-rose-400'    },
+};
 
 export default function Interview() {
   const navigate = useNavigate();
 
-  // Retrieve candidate context from localStorage
   const candidateName = localStorage.getItem('candidate_name') || 'Candidate';
   const candidateRole = localStorage.getItem('candidate_role') || 'Backend Developer';
+  const interviewId    = localStorage.getItem('interview_session_id') || `sess_${Date.now()}`;
 
-  // Questions and navigation state
-  const [questions, setQuestions] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [answer, setAnswer] = useState('');
-  const [evaluation, setEvaluation] = useState(null);
-  const [submitError, setSubmitError] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Current question shown to the candidate (public shape: { id, title, difficulty? })
+  const [currentQuestion, setCurrentQuestion]   = useState(null);
+  const [currentIndex, setCurrentIndex]         = useState(0);
+  const [answer, setAnswer]                     = useState('');
+  const [evaluation, setEvaluation]             = useState(null);
+  const [submitError, setSubmitError]           = useState('');
+  const [nextQError, setNextQError]             = useState('');
+  const [isSubmitting, setIsSubmitting]         = useState(false);
+  const [isGenerating, setIsGenerating]         = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(TOTAL_DURATION_SECONDS);
 
-  const answerRef = useRef('');
-  const questionsRef = useRef([]);
-  const currentIndexRef = useRef(0);
-  const evaluationRef = useRef(null);
+  const answerRef              = useRef('');
+  const currentIndexRef        = useRef(0);
+  const currentQuestionRef     = useRef(null);
+  const evaluationRef          = useRef(null);
   const submissionInProgressRef = useRef(false);
-  const sessionKeyRef = useRef(getInterviewSessionKey());
-  const mountedRef = useRef(true);
-  answerRef.current = answer;
-  questionsRef.current = questions;
-  currentIndexRef.current = currentIndex;
-  evaluationRef.current = evaluation;
+  const sessionKeyRef          = useRef(getInterviewSessionKey());
+  const mountedRef             = useRef(true);
+
+  answerRef.current          = answer;
+  currentIndexRef.current    = currentIndex;
+  currentQuestionRef.current = currentQuestion;
+  evaluationRef.current      = evaluation;
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // 1. Load questions (from localStorage or fetch as fallback)
+  // ── 1. Load first predefined question ────────────────────────────────────
   useEffect(() => {
-    async function loadQuestions() {
-      const cached = localStorage.getItem('interview_questions');
-      if (cached) {
-        try {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            setQuestions(parsed);
-            return;
+    async function loadFirstQuestion() {
+      // Restore a resumed session
+      const savedIndex = parseInt(localStorage.getItem('current_question_index') || '0', 10);
+
+      if (savedIndex > 0) {
+        // Resume: restore persisted question text from interview_answers
+        const cached = readInterviewAnswers();
+        // We only need the question object for the CURRENT (unanswered) question.
+        // If savedIndex < cached.length, the candidate already answered it, so show
+        // the last-answered question with its evaluation and wait for Next.
+        const lastEntry = cached[savedIndex - 1];
+        if (lastEntry) {
+          setCurrentQuestion({ id: lastEntry.question_id, title: lastEntry.question_title, difficulty: lastEntry.difficulty });
+          setCurrentIndex(savedIndex - 1);
+          if (lastEntry.evaluation) {
+            setAnswer(lastEntry.answer || '');
+            setEvaluation(lastEntry.evaluation);
+          } else if (lastEntry.evaluation_status === 'draft') {
+            setAnswer(lastEntry.answer || '');
           }
-        } catch (e) {
-          console.warn('Error parsing cached questions:', e);
+          return;
         }
       }
 
-      // If not cached, fetch from backend for the selected role
-      const fetched = await fetchQuestionsByRole(candidateRole);
-      setQuestions(fetched);
-      localStorage.setItem('interview_questions', JSON.stringify(fetched));
+      // Fresh session: fetch predefined question 1
+      try {
+        const cached = localStorage.getItem('interview_questions');
+        let questions = [];
+        if (cached) {
+          questions = JSON.parse(cached);
+        }
+        if (!Array.isArray(questions) || questions.length === 0) {
+          questions = await fetchQuestionsByRole(candidateRole);
+          localStorage.setItem('interview_questions', JSON.stringify(questions));
+        }
+        if (questions.length > 0) {
+          setCurrentQuestion({ ...questions[0], difficulty: 'Medium' });
+          setCurrentIndex(0);
+          localStorage.setItem('current_question_index', '0');
+        }
+      } catch (e) {
+        console.warn('Failed to load first question:', e);
+      }
     }
 
-    loadQuestions();
-
-    // Restore index if candidate refreshed mid-interview
-    const savedIndex = parseInt(localStorage.getItem('current_question_index') || '0', 10);
-    if (!isNaN(savedIndex) && savedIndex >= 0) {
-      setCurrentIndex(savedIndex);
-    }
+    loadFirstQuestion();
   }, [candidateRole]);
 
-  // 2. Persistent Wall-Clock 30-Minute Timer
+  // ── 2. Persistent 30-minute wall-clock timer ─────────────────────────────
   useEffect(() => {
     let startTime = parseInt(localStorage.getItem('interview_start_time') || '0', 10);
     if (!startTime) {
@@ -100,8 +131,8 @@ export default function Interview() {
     }
 
     const calculateRemaining = () => {
-      const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-      return Math.max(0, TOTAL_DURATION_SECONDS - elapsedSeconds);
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      return Math.max(0, TOTAL_DURATION_SECONDS - elapsed);
     };
 
     setSecondsRemaining(calculateRemaining());
@@ -109,8 +140,6 @@ export default function Interview() {
     const timerInterval = setInterval(() => {
       const remaining = calculateRemaining();
       setSecondsRemaining(remaining);
-
-      // Automatic timeout handling when 30 minutes expire
       if (remaining <= 0) {
         clearInterval(timerInterval);
         handleTimeExpired();
@@ -121,25 +150,25 @@ export default function Interview() {
   }, []);
 
   const handleTimeExpired = () => {
-    // Preserve the current response even if time expires before AI evaluation completes.
-    const currentTyped = answerRef.current.trim();
-    const activeQuestions = questionsRef.current;
-    const activeIndex = currentIndexRef.current;
-    const activeQuestion = activeQuestions[activeIndex];
+    const typedAnswer  = answerRef.current.trim();
+    const activeQ      = currentQuestionRef.current;
+    const activeIndex  = currentIndexRef.current;
 
-    if (currentTyped && activeQuestion) {
-      const timedEntry = {
-        question_id: activeQuestion.id,
-        question_number: activeIndex + 1,
-        question_title: activeQuestion.title,
-        answer: currentTyped,
-        submitted_at: new Date().toISOString(),
-        evaluation: evaluationRef.current,
-        evaluation_status: evaluationRef.current ? 'complete' : 'draft'
-      };
-      saveInterviewAnswer(timedEntry, sessionKeyRef.current);
+    if (typedAnswer && activeQ) {
+      saveInterviewAnswer(
+        {
+          question_id:    activeQ.id,
+          question_number: activeIndex + 1,
+          question_title: activeQ.title,
+          difficulty:     activeQ.difficulty || 'Medium',
+          answer:         typedAnswer,
+          submitted_at:   new Date().toISOString(),
+          evaluation:     evaluationRef.current,
+          evaluation_status: evaluationRef.current ? 'complete' : 'draft',
+        },
+        sessionKeyRef.current,
+      );
     }
-
     navigate('/result');
   };
 
@@ -149,30 +178,9 @@ export default function Interview() {
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   };
 
-  const currentQuestion = questions[currentIndex] || {
-    id: `q_${currentIndex + 1}`,
-    title: 'Loading question...',
-    role: candidateRole
-  };
+  const isLastQuestion = currentIndex >= TOTAL_QUESTIONS - 1;
 
-  const isLastQuestion = currentIndex >= (questions.length - 1) && questions.length > 0;
-
-  // Restore answer/evaluation or draft when the page is refreshed mid-question.
-  useEffect(() => {
-    if (!questions.length) return;
-    const cached = readInterviewAnswers();
-    const existing = cached.find((item) => item.question_id === currentQuestion.id);
-    if (existing?.evaluation) {
-      setAnswer(existing.answer || '');
-      setEvaluation(existing.evaluation);
-    } else if (existing?.evaluation_status === 'draft' && existing.answer) {
-      // Restore a submitted draft whose evaluation failed before success
-      setAnswer(existing.answer);
-      setEvaluation(null);
-    }
-  }, [questions, currentIndex, currentQuestion.id]);
-
-  // 3. Evaluate the current answer before allowing progression.
+  // ── 3. Submit answer → evaluate ───────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     const submittedAnswer = answer.trim();
@@ -182,38 +190,39 @@ export default function Interview() {
       return;
     }
     if (submissionInProgressRef.current || isSubmitting || evaluation) return;
+    if (!currentQuestion) return;
 
     submissionInProgressRef.current = true;
     setIsSubmitting(true);
     setSubmitError('');
 
-    // Persist the draft immediately so a refresh or failure does not lose it.
+    // Persist draft immediately so a refresh never loses the answer.
     const draftEntry = {
-      question_id: currentQuestion.id,
+      question_id:    currentQuestion.id,
       question_number: currentIndex + 1,
       question_title: currentQuestion.title,
-      answer: submittedAnswer,
-      submitted_at: new Date().toISOString(),
-      evaluation: null,
-      evaluation_status: 'draft'
+      difficulty:     currentQuestion.difficulty || 'Medium',
+      answer:         submittedAnswer,
+      submitted_at:   new Date().toISOString(),
+      evaluation:     null,
+      evaluation_status: 'draft',
     };
     saveInterviewAnswer(draftEntry, sessionKeyRef.current);
 
-    // Snapshot the session key so we can guard against late responses.
     const submissionSessionKey = sessionKeyRef.current;
 
     try {
       const result = await submitAnswerForEvaluation(
         candidateRole,
         currentQuestion.id,
-        submittedAnswer
+        submittedAnswer,
       );
 
-      // If the component unmounted or a new interview session started, discard.
       if (!mountedRef.current || submissionSessionKey !== getInterviewSessionKey()) return;
 
       const completedEntry = { ...draftEntry, evaluation: result, evaluation_status: 'complete' };
       saveInterviewAnswer(completedEntry, submissionSessionKey);
+
       if (mountedRef.current) {
         setAnswer(submittedAnswer);
         setEvaluation(result);
@@ -228,7 +237,8 @@ export default function Interview() {
     }
   };
 
-  const handleNextQuestion = () => {
+  // ── 4. Request next adaptive question ─────────────────────────────────────
+  const handleNextQuestion = async () => {
     if (!evaluation) return;
 
     if (isLastQuestion) {
@@ -236,19 +246,78 @@ export default function Interview() {
       return;
     }
 
-    const nextIndex = currentIndex + 1;
-    setCurrentIndex(nextIndex);
-    localStorage.setItem('current_question_index', nextIndex.toString());
-    setAnswer('');
-    setEvaluation(null);
-    setSubmitError('');
+    setIsGenerating(true);
+    setNextQError('');
+
+    try {
+      const nextQ = await requestNextQuestion(
+        candidateRole,
+        currentQuestion.title,
+        answer,
+        evaluation.score,
+        currentIndex + 1,       // 1-based current question number
+        interviewId,
+      );
+
+      if (!mountedRef.current) return;
+
+      const nextIndex = currentIndex + 1;
+      const nextQuestion = {
+        id:         nextQ.question_id,
+        title:      nextQ.question,
+        difficulty: nextQ.difficulty,
+      };
+
+      setCurrentQuestion(nextQuestion);
+      setCurrentIndex(nextIndex);
+      setAnswer('');
+      setEvaluation(null);
+      setNextQError('');
+      localStorage.setItem('current_question_index', nextIndex.toString());
+    } catch (error) {
+      if (mountedRef.current) {
+        setNextQError(
+          error.message ||
+          'Could not generate the next question. Your answer is saved — please retry.',
+        );
+      }
+    } finally {
+      if (mountedRef.current) setIsGenerating(false);
+    }
   };
+
+  // ── 5. Restore a draft / evaluated state on page refresh ─────────────────
+  useEffect(() => {
+    if (!currentQuestion) return;
+    const cached   = readInterviewAnswers();
+    const existing = cached.find((item) => item.question_id === currentQuestion.id);
+    if (existing?.evaluation) {
+      setAnswer(existing.answer || '');
+      setEvaluation(existing.evaluation);
+    } else if (existing?.evaluation_status === 'draft' && existing.answer) {
+      setAnswer(existing.answer);
+      setEvaluation(null);
+    }
+  }, [currentQuestion?.id]);
+
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center">
+        <div className="flex items-center gap-3 text-slate-400">
+          <Loader2 className="w-5 h-5 animate-spin text-indigo-400" />
+          <span className="text-sm">Loading question…</span>
+        </div>
+      </div>
+    );
+  }
+
+  const diffStyle = DIFFICULTY_STYLES[currentQuestion.difficulty] || DIFFICULTY_STYLES.Medium;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
 
-        {/* Top Header / Meta Bar */}
+        {/* ── Header bar ── */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-xl">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm text-slate-300">
@@ -262,7 +331,6 @@ export default function Interview() {
             </div>
           </div>
 
-          {/* 30-Minute Persistent Timer Component */}
           <div className="flex items-center gap-2.5 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 shadow-inner">
             <Clock className={`w-4 h-4 ${secondsRemaining < 300 ? 'text-rose-400 animate-pulse' : 'text-indigo-400'}`} />
             <div className="text-xs text-slate-400 font-medium">Time Remaining:</div>
@@ -275,32 +343,42 @@ export default function Interview() {
           </div>
         </div>
 
-        {/* Progress Bar */}
+        {/* ── Progress bar ── */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-md">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>Progress: Question {currentIndex + 1} of {questions.length || 5}</span>
-            <span className="font-medium text-indigo-400">{Math.round(((currentIndex) / (questions.length || 5)) * 100)}% Complete</span>
+            <span>Progress: Question {currentIndex + 1} of {TOTAL_QUESTIONS}</span>
+            <span className="font-medium text-indigo-400">
+              {Math.round((currentIndex / TOTAL_QUESTIONS) * 100)}% Complete
+            </span>
           </div>
           <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
-            <div 
+            <div
               className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full transition-all duration-300"
-              style={{ width: `${Math.max(10, ((currentIndex) / (questions.length || 5)) * 100)}%` }}
-            ></div>
+              style={{ width: `${Math.max(10, (currentIndex / TOTAL_QUESTIONS) * 100)}%` }}
+            />
           </div>
         </div>
 
-        {/* Main Content Layout: 2 Columns */}
+        {/* ── Main content ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* Left Column: Question & Answer (2 cols) */}
+          {/* ── Left: Question + Answer form ── */}
           <div className="lg:col-span-2 space-y-6">
 
-            {/* Current Question Section */}
+            {/* Question card */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xl">
               <div className="flex items-center justify-between gap-4 mb-4">
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-semibold">
-                  <HelpCircle className="w-3.5 h-3.5" />
-                  <span>Question {currentIndex + 1} of {questions.length || 5}</span>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 text-xs font-semibold">
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>Question {currentIndex + 1} of {TOTAL_QUESTIONS}</span>
+                  </div>
+                  {currentQuestion.difficulty && (
+                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border ${diffStyle.bg} ${diffStyle.border} ${diffStyle.text}`}>
+                      <Zap className="w-3 h-3" />
+                      {currentQuestion.difficulty}
+                    </span>
+                  )}
                 </div>
                 <span className="text-xs text-slate-400">{candidateRole} Track</span>
               </div>
@@ -308,13 +386,15 @@ export default function Interview() {
               <h2 className="text-xl sm:text-2xl font-semibold text-white tracking-tight leading-snug">
                 {currentQuestion.title}
               </h2>
-              
+
               <p className="mt-3 text-sm text-slate-400">
-                Provide a structured, comprehensive technical explanation. Highlight architectural considerations, trade-offs, and best practices.
+                {currentIndex === 0
+                  ? 'Provide a structured technical explanation. Highlight architecture, trade-offs, and best practices.'
+                  : 'Follow up on the previous topic. Demonstrate depth and practical understanding.'}
               </p>
             </div>
 
-            {/* Answer Input Section */}
+            {/* Answer form */}
             <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xl space-y-4">
               <div className="flex items-center justify-between">
                 <label htmlFor="interviewAnswer" className="text-sm font-semibold text-slate-200">
@@ -334,7 +414,7 @@ export default function Interview() {
                   if (submitError) setSubmitError('');
                 }}
                 disabled={isSubmitting || Boolean(evaluation)}
-                placeholder="Type your technical answer here. Address key concepts, mechanisms, and implementation details..."
+                placeholder="Type your technical answer here. Address key concepts, mechanisms, and implementation details…"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-y leading-relaxed disabled:opacity-75 disabled:cursor-not-allowed"
                 required
               />
@@ -349,8 +429,8 @@ export default function Interview() {
               <div className="flex items-center justify-between gap-4 pt-2">
                 <p className="text-xs text-slate-500">
                   {evaluation
-                    ? 'Evaluation complete. Review it before continuing.'
-                    : 'Your answer will remain available if AI evaluation fails.'}
+                    ? 'Evaluation complete. Review it then continue.'
+                    : 'Your answer is saved immediately — a retry will not lose it.'}
                 </p>
 
                 {!evaluation && (
@@ -359,19 +439,19 @@ export default function Interview() {
                     disabled={isSubmitting || !answer.trim()}
                     className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
                   >
-                    {isSubmitting ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                    <span>{isSubmitting ? 'Evaluating Answer...' : 'Submit for Evaluation'}</span>
+                    {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    <span>{isSubmitting ? 'Evaluating Answer…' : 'Submit for Evaluation'}</span>
                   </button>
                 )}
               </div>
             </form>
 
+            {/* ── Evaluation card ── */}
             {evaluation && (
-              <section className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-7 shadow-xl space-y-5" aria-live="polite">
+              <section
+                className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-7 shadow-xl space-y-5"
+                aria-live="polite"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-wider text-indigo-400 mb-1">
@@ -395,50 +475,80 @@ export default function Interview() {
                     <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400 mb-3">
                       <TrendingUp className="w-4 h-4" /> Strengths
                     </div>
-                    <ul className="space-y-2">
-                      {evaluation.strengths.map((strength, index) => (
-                        <li key={`${strength}-${index}`} className="flex items-start gap-2 text-xs text-slate-300">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
-                          <span>{strength}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {evaluation.strengths.length > 0 ? (
+                      <ul className="space-y-2">
+                        {evaluation.strengths.map((s, i) => (
+                          <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                            <span>{s}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400">No specific technical strengths identified.</p>
+                    )}
                   </div>
 
                   <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4">
                     <div className="flex items-center gap-2 text-sm font-semibold text-amber-400 mb-3">
                       <AlertCircle className="w-4 h-4" /> Areas for Improvement
                     </div>
-                    <ul className="space-y-2">
-                      {evaluation.improvements.map((improvement, index) => (
-                        <li key={`${improvement}-${index}`} className="flex items-start gap-2 text-xs text-slate-300">
-                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
-                          <span>{improvement}</span>
-                        </li>
-                      ))}
-                    </ul>
+                    {evaluation.improvements.length > 0 ? (
+                      <ul className="space-y-2">
+                        {evaluation.improvements.map((imp, i) => (
+                          <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
+                            <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                            <span>{imp}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400">No significant gaps identified.</p>
+                    )}
                   </div>
                 </div>
+
+                {!isLastQuestion && (
+                  <div className="pt-1 text-xs text-indigo-300/70 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>
+                      {evaluation.score < 5
+                        ? 'Next question will be easier to consolidate the fundamentals.'
+                        : evaluation.score <= 7
+                          ? 'Next question will be at a similar difficulty.'
+                          : 'Great answer! Next question will be harder.'}
+                    </span>
+                  </div>
+                )}
+
+                {nextQError && (
+                  <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-sm text-rose-300">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                    <span>{nextQError}</span>
+                  </div>
+                )}
 
                 <div className="flex justify-end pt-1">
                   <button
                     type="button"
                     onClick={handleNextQuestion}
-                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
+                    disabled={isGenerating}
+                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
                   >
-                    <span>{isLastQuestion ? 'View Results' : 'Next Question'}</span>
-                    <ArrowRight className="w-4 h-4" />
+                    {isGenerating ? (
+                      <><Loader2 className="w-4 h-4 animate-spin" /><span>Generating Question…</span></>
+                    ) : (
+                      <><span>{isLastQuestion ? 'View Results' : 'Next Question'}</span><ArrowRight className="w-4 h-4" /></>
+                    )}
                   </button>
                 </div>
               </section>
             )}
-
           </div>
 
-          {/* Right Column: Webcam & Monitoring Placeholders (1 col) */}
+          {/* ── Right: Webcam + Monitoring placeholders ── */}
           <div className="space-y-6">
 
-            {/* Webcam Preview Placeholder */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
@@ -450,21 +560,17 @@ export default function Interview() {
                 </span>
               </div>
 
-              {/* Placeholder Video Container */}
               <div className="relative aspect-video rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center p-4 text-center overflow-hidden">
                 <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-2">
                   <CameraOff className="w-6 h-6" />
                 </div>
-                <div className="text-xs font-medium text-slate-300">
-                  Camera Feed Disabled
-                </div>
+                <div className="text-xs font-medium text-slate-300">Camera Feed Disabled</div>
                 <div className="text-[11px] text-slate-500 mt-1 max-w-[200px]">
-                  Webcam stream and MediaPipe proctoring will activate in Hour 4 & 5.
+                  Webcam stream and MediaPipe proctoring will activate in Hour 5.
                 </div>
               </div>
             </div>
 
-            {/* Monitoring Status Placeholder */}
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
@@ -476,7 +582,6 @@ export default function Interview() {
                 </span>
               </div>
 
-              {/* Status Indicators */}
               <div className="space-y-2.5 text-xs">
                 <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
                   <span className="text-slate-400 flex items-center gap-2">
@@ -484,14 +589,12 @@ export default function Interview() {
                   </span>
                   <span className="text-slate-500 font-mono">Standby</span>
                 </div>
-
                 <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
                   <span className="text-slate-400 flex items-center gap-2">
                     <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> Tab Focus
                   </span>
                   <span className="text-emerald-400 font-semibold">Active</span>
                 </div>
-
                 <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
                   <span className="text-slate-400 flex items-center gap-2">
                     <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Integrity Score
@@ -501,14 +604,12 @@ export default function Interview() {
               </div>
 
               <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-800">
-                Cheating and gaze detection scheduled for Hour 4 & 5.
+                Cheating and gaze detection scheduled for Hour 5 & 6.
               </div>
             </div>
 
           </div>
-
         </div>
-
       </div>
     </div>
   );

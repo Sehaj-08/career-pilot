@@ -116,26 +116,15 @@ def _parse_model_content(content: str) -> AIEvaluation:
         raise AIResponseError("Ollama returned an invalid evaluation structure") from exc
 
 
-async def evaluate_candidate_answer(
-    *,
-    question: str,
-    reference_answer: str,
-    evaluation_concepts: List[str],
-    candidate_answer: str,
-) -> AIEvaluation:
-    """Evaluate an answer with the configured local Ollama model."""
+async def call_llm(messages: List[Dict[str, str]], response_model: Any) -> Any:
+    """Generic call to the configured local Ollama model."""
     base_url, model, timeout_seconds = _get_ollama_config()
     request_payload = {
         "model": model,
-        "messages": _build_messages(
-            question=question,
-            reference_answer=reference_answer,
-            evaluation_concepts=evaluation_concepts,
-            candidate_answer=candidate_answer,
-        ),
+        "messages": messages,
         "stream": False,
-        "format": AIEvaluation.model_json_schema(),
-        "options": {"temperature": 0.1},
+        "format": response_model.model_json_schema(),
+        "options": {"temperature": 0.2},
     }
 
     timeout = httpx.Timeout(timeout_seconds, connect=min(10.0, timeout_seconds))
@@ -168,6 +157,37 @@ async def evaluate_candidate_answer(
         raise AIResponseError("Ollama returned an unreadable response") from exc
 
     if not isinstance(content, str) or not content.strip():
-        raise AIResponseError("Ollama returned an empty evaluation")
+        raise AIResponseError("Ollama returned an empty response")
 
-    return _parse_model_content(content)
+    # Reuse existing parser logic
+    cleaned = content.strip()
+    if cleaned.startswith("```") and cleaned.endswith("```"):
+        lines = cleaned.splitlines()
+        if len(lines) >= 3:
+            cleaned = "\n".join(lines[1:-1]).strip()
+
+    try:
+        payload: Any = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise AIResponseError("Ollama returned malformed JSON") from exc
+
+    try:
+        return response_model.model_validate(payload)
+    except ValidationError as exc:
+        raise AIResponseError("Ollama returned an invalid structure") from exc
+
+async def evaluate_candidate_answer(
+    *,
+    question: str,
+    reference_answer: str,
+    evaluation_concepts: List[str],
+    candidate_answer: str,
+) -> AIEvaluation:
+    """Evaluate an answer with the configured local Ollama model."""
+    messages = _build_messages(
+        question=question,
+        reference_answer=reference_answer,
+        evaluation_concepts=evaluation_concepts,
+        candidate_answer=candidate_answer,
+    )
+    return await call_llm(messages, AIEvaluation)

@@ -1,10 +1,20 @@
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
 from app.services.question_generator import (
-    get_questions_by_role, 
-    get_all_questions, 
-    ALLOWED_ROLES
+    get_questions_by_role,
+    get_all_questions,
+    generate_next_question,
+    ALLOWED_ROLES,
+)
+from app.schemas.interview import AdaptiveQuestionRequest, AdaptiveQuestionResponse
+from app.database.db import save_adaptive_question
+from app.services.ai_engine import (
+    AIEngineError,
+    AIResponseError,
+    OllamaConnectionError,
+    OllamaModelUnavailableError,
+    OllamaTimeoutError,
 )
 
 router = APIRouter()
@@ -102,3 +112,81 @@ def start_interview_session(payload: SessionStartRequest):
         "total_questions": len(questions),
         "questions": questions
     }
+
+
+@router.post("/next-question", response_model=AdaptiveQuestionResponse)
+async def get_next_question(payload: AdaptiveQuestionRequest) -> AdaptiveQuestionResponse:
+    """
+    Generate the next adaptive question based on the previous answer and score.
+    Reference answers and evaluation concepts are stored server-side only.
+    """
+    if payload.role not in ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid job role: '{payload.role}'. Allowed roles: {ALLOWED_ROLES}",
+        )
+
+    if payload.current_question_number >= 5:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="All 5 questions have been answered. Navigate to the results page.",
+        )
+
+    try:
+        generated = await generate_next_question(
+            role=payload.role,
+            previous_question=payload.previous_question,
+            answer=payload.answer,
+            score=payload.score,
+            current_question_number=payload.current_question_number,
+            interview_id=payload.interview_id,
+        )
+    except OllamaModelUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"AI model '{exc.model}' is unavailable. "
+                f"Install it with: ollama pull {exc.model}"
+            ),
+        ) from exc
+    except OllamaConnectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="AI question generation service is unavailable. Ensure Ollama is running.",
+        ) from exc
+    except OllamaTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="AI question generation timed out. Please retry.",
+        ) from exc
+    except AIResponseError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI returned an invalid question. Please retry.",
+        ) from exc
+    except AIEngineError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI question generation failed. Please retry.",
+        ) from exc
+
+    next_q_number = payload.current_question_number + 1
+    question_id = f"adaptive_{payload.interview_id}_{next_q_number}"
+
+    # Persist private data server-side so Hour 3 evaluation can access it.
+    save_adaptive_question(
+        interview_id=payload.interview_id,
+        question_id=question_id,
+        data={
+            "role": payload.role,
+            "title": generated.question,
+            "reference_answer": generated.expected_answer,
+            "evaluation_concepts": generated.important_concepts,
+        },
+    )
+
+    return AdaptiveQuestionResponse(
+        question_id=question_id,
+        question=generated.question,
+        difficulty=generated.difficulty,
+    )

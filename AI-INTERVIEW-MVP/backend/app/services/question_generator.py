@@ -1,6 +1,9 @@
 import json
 import os
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+from app.schemas.interview import GeneratedQuestion
+from app.services.ai_engine import call_llm
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), '..', 'data', 'questions.json')
 
@@ -23,7 +26,7 @@ def load_all_raw_questions() -> List[Dict[str, Any]]:
 def get_questions_by_role(role: str, public_only: bool = True) -> List[Dict[str, Any]]:
     """
     Retrieves predefined questions for a specific job role.
-    
+
     If public_only=True, reference answers and evaluation concepts are stripped
     to ensure candidates cannot inspect them in network responses.
     """
@@ -33,7 +36,6 @@ def get_questions_by_role(role: str, public_only: bool = True) -> List[Dict[str,
     if not public_only:
         return role_questions
 
-    # Strip reference answers & evaluation concepts for client responses
     sanitized = []
     for q in role_questions:
         sanitized.append({
@@ -69,3 +71,58 @@ def get_question_by_role_and_id(role: str, question_id: str) -> Optional[Dict[st
         ),
         None,
     )
+
+
+def _get_difficulty(score: int) -> str:
+    if score < 5:
+        return "Easy"
+    elif score <= 7:
+        return "Medium"
+    else:
+        return "Hard"
+
+
+async def generate_next_question(
+    *,
+    role: str,
+    previous_question: str,
+    answer: str,
+    score: int,
+    current_question_number: int,
+    interview_id: str,
+) -> GeneratedQuestion:
+    difficulty = _get_difficulty(score)
+
+    prompt = f"""You are a technical interviewer for the role: {role}.
+
+Rules:
+- Generate a single follow-up technical question relevant to {role}.
+- Difficulty must be: {difficulty}.
+- Build naturally on the previous question and candidate answer.
+- Do not repeat the previous question.
+- Do not ask about prompt engineering, AI, or grading rules.
+- Keep the question practical, specific, and clear.
+- Provide the expected answer privately; never expose internal logic in the question.
+- Return JSON matching the required schema exactly.
+"""
+
+    input_data = {
+        "job_role": role,
+        "target_difficulty": difficulty,
+        "previous_question": previous_question,
+        "candidate_answer": answer,
+        "evaluation_score": score,
+        "current_question_number": current_question_number,
+        "interview_id": interview_id,
+    }
+
+    messages = [
+        {"role": "system", "content": prompt},
+        {
+            "role": "user",
+            "content": "Generate the next interview question for this JSON record:\n"
+            + json.dumps(input_data, ensure_ascii=False),
+        },
+    ]
+
+    return await call_llm(messages, GeneratedQuestion)

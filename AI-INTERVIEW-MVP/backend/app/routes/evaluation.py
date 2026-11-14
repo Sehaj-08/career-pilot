@@ -10,6 +10,7 @@ from app.services.ai_engine import (
     evaluate_candidate_answer,
 )
 from app.services.question_generator import ALLOWED_ROLES, get_question_by_role_and_id
+from app.database.db import get_adaptive_question
 
 
 router = APIRouter()
@@ -26,15 +27,37 @@ async def evaluate_answer(submission: AnswerSubmission) -> EvaluationResponse:
             ),
         )
 
-    question = get_question_by_role_and_id(submission.role, submission.question_id)
-    if question is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=(
-                f"Question '{submission.question_id}' was not found for role "
-                f"'{submission.role}'."
-            ),
-        )
+    # Resolve adaptive questions (IDs like adaptive_<interview_id>_<n>)
+    # or fall back to predefined questions.
+    if submission.question_id.startswith("adaptive_"):
+        # Format: adaptive_<interview_id>_<question_number>
+        # We need interview_id; it embeds everything before the last underscore segment.
+        # Store lookup: adaptive_<interview_id>_<n> — interview_id may contain underscores.
+        # Find by scanning all sessions in the store using just the full question_id.
+        from app.database.db import ADAPTIVE_QUESTION_STORE
+        question = None
+        for session_questions in ADAPTIVE_QUESTION_STORE.values():
+            if submission.question_id in session_questions:
+                question = session_questions[submission.question_id]
+                break
+        if question is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Adaptive question '{submission.question_id}' was not found. "
+                    "It may have been lost due to a server restart."
+                ),
+            )
+    else:
+        question = get_question_by_role_and_id(submission.role, submission.question_id)
+        if question is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=(
+                    f"Question '{submission.question_id}' was not found for role "
+                    f"'{submission.role}'."
+                ),
+            )
 
     try:
         evaluation = await evaluate_candidate_answer(

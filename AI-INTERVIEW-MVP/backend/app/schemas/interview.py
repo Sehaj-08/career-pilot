@@ -48,9 +48,45 @@ class EvaluationResponse(AIEvaluation):
     question_id: str
 
 
-class InterviewResult(BaseModel):
-    session_id: str
-    overall_score: int
-    technical_score: int
-    integrity_score: int
-    feedback: str
+class AdaptiveQuestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: str = Field(min_length=1, max_length=100)
+    previous_question: str = Field(min_length=1, max_length=1_000)
+    answer: str = Field(min_length=1, max_length=10_000)
+    score: int = Field(strict=True, ge=0, le=10)
+    current_question_number: int = Field(strict=True, ge=1, le=5)
+    interview_id: str = Field(min_length=1, max_length=100)
+
+    @field_validator("role", "previous_question", "answer", "interview_id")
+    @classmethod
+    def strip_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
+
+
+class GeneratedQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=5, max_length=1_000)
+    difficulty: str = Field(min_length=3, max_length=50)
+    expected_answer: str = Field(min_length=5, max_length=5_000)
+    important_concepts: List[str] = Field(min_length=1, max_length=10)
+
+    @field_validator("question", "difficulty", "expected_answer")
+    @classmethod
+    def strip_str(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
+
+
+class AdaptiveQuestionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: str
+    question: str
+    difficulty: str

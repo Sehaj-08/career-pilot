@@ -68,6 +68,30 @@ export async function startInterviewSession(candidateName, role) {
   }
 }
 
+/**
+ * Request the next adaptive question from the backend.
+ * Calls POST /api/interview/next-question
+ */
+export async function requestNextQuestion(role, previousQuestion, answer, score, currentQuestionNumber, interviewId) {
+  try {
+    const response = await client.post('/api/interview/next-question', {
+      role,
+      previous_question: previousQuestion,
+      answer,
+      score,
+      current_question_number: currentQuestionNumber,
+      interview_id: interviewId,
+    }, { timeout: 130000 });
+    return response.data;
+  } catch (error) {
+    const message = error.response?.data?.detail
+      || (error.code === 'ECONNABORTED'
+        ? 'AI question generation timed out. Your answer is saved — please retry.'
+        : 'Could not generate the next question. Your answer is saved — please retry.');
+    throw new Error(message);
+  }
+}
+
 /** Read the existing local interview session without crashing on corrupt storage. */
 export function readInterviewAnswers() {
   try {
