@@ -26,6 +26,10 @@ import {
   readInterviewAnswers,
   saveInterviewAnswer,
 } from '../services/api';
+import { useWebcam } from '../hooks/useWebcam';
+import { useMonitoring } from '../hooks/useMonitoring';
+import WebcamMonitor from '../components/WebcamMonitor';
+import MonitoringPanel from '../components/MonitoringPanel';
 
 const TOTAL_DURATION_SECONDS = 30 * 60;
 const TOTAL_QUESTIONS = 5;
@@ -53,6 +57,12 @@ export default function Interview() {
   const [isSubmitting, setIsSubmitting]         = useState(false);
   const [isGenerating, setIsGenerating]         = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(TOTAL_DURATION_SECONDS);
+  const { videoRef, isCameraActive, error, faceCount } = useWebcam();
+  const { metrics, warning, updateFaceMetrics } = useMonitoring();
+
+  useEffect(() => {
+    updateFaceMetrics(faceCount);
+  }, [faceCount]);
 
   const answerRef              = useRef('');
   const currentIndexRef        = useRef(0);
@@ -549,64 +559,16 @@ export default function Interview() {
           {/* ── Right: Webcam + Monitoring placeholders ── */}
           <div className="space-y-6">
 
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  <Video className="w-4 h-4 text-indigo-400" />
-                  <span>Webcam Preview</span>
-                </div>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700">
-                  Placeholder
-                </span>
-              </div>
-
-              <div className="relative aspect-video rounded-xl bg-slate-950 border border-slate-800 flex flex-col items-center justify-center p-4 text-center overflow-hidden">
-                <div className="w-12 h-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-500 mb-2">
-                  <CameraOff className="w-6 h-6" />
-                </div>
-                <div className="text-xs font-medium text-slate-300">Camera Feed Disabled</div>
-                <div className="text-[11px] text-slate-500 mt-1 max-w-[200px]">
-                  Webcam stream and MediaPipe proctoring will activate in Hour 5.
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                  <span>Monitoring Status</span>
-                </div>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Placeholder
-                </span>
-              </div>
-
-              <div className="space-y-2.5 text-xs">
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
-                  <span className="text-slate-400 flex items-center gap-2">
-                    <Eye className="w-3.5 h-3.5 text-indigo-400" /> Face Tracking
-                  </span>
-                  <span className="text-slate-500 font-mono">Standby</span>
-                </div>
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
-                  <span className="text-slate-400 flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> Tab Focus
-                  </span>
-                  <span className="text-emerald-400 font-semibold">Active</span>
-                </div>
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
-                  <span className="text-slate-400 flex items-center gap-2">
-                    <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Integrity Score
-                  </span>
-                  <span className="text-slate-200 font-bold font-mono">100%</span>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-800">
-                Cheating and gaze detection scheduled for Hour 5 & 6.
-              </div>
-            </div>
+            <WebcamMonitor
+              videoRef={videoRef}
+              isCameraActive={isCameraActive}
+              error={error}
+              faceCount={faceCount}
+            />
+            <MonitoringPanel
+              metrics={metrics}
+              warning={warning}
+            />
 
           </div>
         </div>

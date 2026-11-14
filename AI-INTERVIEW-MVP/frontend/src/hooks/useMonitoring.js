@@ -10,6 +10,16 @@ export function useMonitoring() {
   });
   const [warning, setWarning] = useState('');
 
+  // Update face metrics from webcam hook
+  const updateFaceMetrics = (count) => {
+    setMetrics(prev => ({
+      ...prev,
+      faceDetected: count > 0,
+      multipleFaces: count > 1,
+      integrityScore: Math.max(0, prev.integrityScore - (count === 0 ? 0.1 : count > 1 ? 0.5 : 0))
+    }));
+  };
+
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -31,5 +41,5 @@ export function useMonitoring() {
     };
   }, []);
 
-  return { metrics, warning, setMetrics, setWarning };
+  return { metrics, warning, setMetrics, setWarning, updateFaceMetrics };
 }
