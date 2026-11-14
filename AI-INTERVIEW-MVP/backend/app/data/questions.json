@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "title": "Explain the difference between synchronous and asynchronous execution in JavaScript.",
+    "category": "Frontend / JavaScript",
+    "difficulty": "Easy"
+  },
+  {
+    "id": 2,
+    "title": "What are the key trade-offs between relational databases and document stores?",
+    "category": "Database",
+    "difficulty": "Medium"
+  },
+  {
+    "id": 3,
+    "title": "How do you secure REST APIs against common vulnerabilities like CSRF and XSS?",
+    "category": "Security & Architecture",
+    "difficulty": "Medium"
+  },
+  {
+    "id": 4,
+    "title": "Describe how you design a system for handling 10,000 concurrent websocket connections.",
+    "category": "System Design",
+    "difficulty": "Hard"
+  }
+]
