@@ -11,7 +11,9 @@ import {
   Sparkles,
   FileText,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ShieldCheck,
+  ShieldAlert
 } from 'lucide-react';
 
 export default function Result() {
@@ -20,12 +22,14 @@ export default function Result() {
   const [candidateName, setCandidateName] = useState('Candidate');
   const [candidateRole, setCandidateRole] = useState('Backend Developer');
   const [submittedAnswers, setSubmittedAnswers] = useState([]);
+  const [monitoringSummary, setMonitoringSummary] = useState(null);
   const [expandedIndex, setExpandedIndex] = useState(0);
 
   useEffect(() => {
     const savedName = localStorage.getItem('candidate_name');
     const savedRole = localStorage.getItem('candidate_role');
     const rawAnswers = localStorage.getItem('interview_answers');
+    const rawMonitoring = localStorage.getItem('interview_monitoring_summary');
 
     if (savedName) setCandidateName(savedName);
     if (savedRole) setCandidateRole(savedRole);
@@ -39,10 +43,19 @@ export default function Result() {
         console.warn('Error reading answers:', e);
       }
     }
+    if (rawMonitoring) {
+      try {
+        setMonitoringSummary(JSON.parse(rawMonitoring));
+      } catch (e) {
+        console.warn('Error reading monitoring summary:', e);
+      }
+    }
   }, []);
 
   const totalQuestions = 5;
   const questionsCount = submittedAnswers.length;
+  const integrityScore = monitoringSummary?.integrityScore ?? 100;
+  const suspiciousCount = monitoringSummary?.suspiciousCount ?? 0;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 flex justify-center items-center">
@@ -109,60 +122,97 @@ export default function Result() {
           </div>
         </div>
 
-        {/* Score & Questions Summary Placeholders */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {/* 3 Metrics Summary Cards (Technical Score, Questions, Integrity) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
 
           {/* Total Score Placeholder */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Total Score Placeholder
+                  AI Technical Score
                 </span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Hour 3 Feature
+                  Hour 3
                 </span>
               </div>
               <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-400">
+                <span className="text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-400">
                   --
                 </span>
-                <span className="text-lg text-slate-500 font-medium">/ 100</span>
+                <span className="text-sm text-slate-500 font-medium">/ 100</span>
               </div>
-              <div className="text-xs text-amber-400 mt-2 flex items-center gap-1.5 font-medium">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>AI scoring engine will compute scores in Hour 3</span>
+              <div className="text-[11px] text-amber-400 mt-2 flex items-center gap-1 font-medium">
+                <Sparkles className="w-3 h-3" />
+                <span>Pending AI Evaluation (Hour 3)</span>
               </div>
             </div>
-            <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
-              Evaluation metrics: Technical Depth, Relevance, Clarity
+            <div className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-800">
+              Technical Depth & Relevance
             </div>
           </div>
 
           {/* Questions Answered */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                   Questions Answered
                 </span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Completed
+                  Complete
                 </span>
               </div>
               <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-4xl font-extrabold text-white">
+                <span className="text-3xl font-extrabold text-white">
                   {questionsCount}
                 </span>
-                <span className="text-lg text-slate-500 font-medium">/ {totalQuestions} Questions</span>
+                <span className="text-sm text-slate-500 font-medium">/ {totalQuestions} Questions</span>
               </div>
-              <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1.5 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>All {questionsCount} responses preserved for AI evaluation</span>
+              <div className="text-[11px] text-emerald-400 mt-2 flex items-center gap-1 font-medium">
+                <CheckCircle2 className="w-3 h-3" />
+                <span>All {questionsCount} responses saved</span>
               </div>
             </div>
-            <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
-              Technical track: {candidateRole} (Hour 2)
+            <div className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-800">
+              Role: {candidateRole}
+            </div>
+          </div>
+
+          {/* Integrity & Security Score (Hour 6) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Integrity Score
+                </span>
+                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                  integrityScore >= 90
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }`}>
+                  Hour 6 Security
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span className={`text-3xl font-extrabold ${
+                  integrityScore >= 90 ? 'text-emerald-400' : 'text-amber-400'
+                }`}>
+                  {integrityScore}%
+                </span>
+                <span className="text-sm text-slate-500 font-medium">Rating</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1 font-medium">
+                {integrityScore >= 90 ? (
+                  <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                ) : (
+                  <ShieldAlert className="w-3 h-3 text-amber-400" />
+                )}
+                <span>{suspiciousCount} suspicious event(s) logged</span>
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-4 pt-3 border-t border-slate-800">
+              Fullscreen & Tab Monitoring
             </div>
           </div>
 
@@ -248,7 +298,7 @@ export default function Result() {
               </li>
               <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Structured articulation of architecture patterns and implementation trade-offs.</span>
+                <span>Maintained {integrityScore}% security integrity score throughout evaluation.</span>
               </li>
             </ul>
           </div>
@@ -270,7 +320,7 @@ export default function Result() {
               </li>
               <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <span>Elaborate further on incident response and edge-case handling scenarios.</span>
+                <span>Avoid tab switching or losing window focus during active assessments.</span>
               </li>
             </ul>
           </div>

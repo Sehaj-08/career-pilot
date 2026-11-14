@@ -3,18 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Clock, 
   Video, 
-  ShieldAlert, 
   Send, 
-  CheckCircle, 
   User, 
   Briefcase, 
   HelpCircle,
-  Eye,
-  CameraOff,
-  CheckCircle2,
-  AlertCircle
+  CameraOff
 } from 'lucide-react';
 import { fetchQuestionsByRole } from '../services/api';
+import { useMonitoring } from '../hooks/useMonitoring';
+import MonitoringPanel from '../components/MonitoringPanel';
 
 const TOTAL_DURATION_SECONDS = 30 * 60; // 30 minutes
 
@@ -24,6 +21,9 @@ export default function Interview() {
   // Retrieve candidate context from localStorage
   const candidateName = localStorage.getItem('candidate_name') || 'Candidate';
   const candidateRole = localStorage.getItem('candidate_role') || 'Backend Developer';
+
+  // Security and activity monitoring hook
+  const monitoring = useMonitoring();
 
   // Questions and navigation state
   const [questions, setQuestions] = useState([]);
@@ -112,6 +112,7 @@ export default function Interview() {
     }
     
     localStorage.setItem('questions_answered', cachedAnswers.length.toString());
+    localStorage.setItem('interview_monitoring_summary', JSON.stringify(monitoring.summary));
     navigate('/result');
   };
 
@@ -160,7 +161,8 @@ export default function Interview() {
       setAnswer('');
       setIsSubmitting(false);
     } else {
-      // Completed all 5 questions -> navigate to Result
+      // Completed all 5 questions -> persist monitoring summary and navigate to Result
+      localStorage.setItem('interview_monitoring_summary', JSON.stringify(monitoring.summary));
       setTimeout(() => {
         setIsSubmitting(false);
         navigate('/result');
@@ -283,7 +285,7 @@ export default function Interview() {
 
           </div>
 
-          {/* Right Column: Webcam & Monitoring Placeholders (1 col) */}
+          {/* Right Column: Webcam Preview & Functional Monitoring Panel (1 col) */}
           <div className="space-y-6">
 
             {/* Webcam Preview Placeholder */}
@@ -312,46 +314,8 @@ export default function Interview() {
               </div>
             </div>
 
-            {/* Monitoring Status Placeholder */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-slate-300">
-                  <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                  <span>Monitoring Status</span>
-                </div>
-                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Placeholder
-                </span>
-              </div>
-
-              {/* Status Indicators */}
-              <div className="space-y-2.5 text-xs">
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
-                  <span className="text-slate-400 flex items-center gap-2">
-                    <Eye className="w-3.5 h-3.5 text-indigo-400" /> Face Tracking
-                  </span>
-                  <span className="text-slate-500 font-mono">Standby</span>
-                </div>
-
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
-                  <span className="text-slate-400 flex items-center gap-2">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400" /> Tab Focus
-                  </span>
-                  <span className="text-emerald-400 font-semibold">Active</span>
-                </div>
-
-                <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-950 border border-slate-800/80">
-                  <span className="text-slate-400 flex items-center gap-2">
-                    <ShieldAlert className="w-3.5 h-3.5 text-amber-400" /> Integrity Score
-                  </span>
-                  <span className="text-slate-200 font-bold font-mono">100%</span>
-                </div>
-              </div>
-
-              <div className="text-[11px] text-slate-500 pt-2 border-t border-slate-800">
-                Cheating and gaze detection scheduled for Hour 4 & 5.
-              </div>
-            </div>
+            {/* Functional Hour 6 Security & Monitoring Panel */}
+            <MonitoringPanel monitoring={monitoring} />
 
           </div>
 
