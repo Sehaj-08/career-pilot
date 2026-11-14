@@ -12,9 +12,18 @@ import {
   Eye,
   CameraOff,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  ArrowRight,
+  Loader2,
+  TrendingUp
 } from 'lucide-react';
-import { fetchQuestionsByRole } from '../services/api';
+import {
+  fetchQuestionsByRole,
+  submitAnswerForEvaluation,
+  getInterviewSessionKey,
+  readInterviewAnswers,
+  saveInterviewAnswer
+} from '../services/api';
 
 const TOTAL_DURATION_SECONDS = 30 * 60; // 30 minutes
 
@@ -29,11 +38,27 @@ export default function Interview() {
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answer, setAnswer] = useState('');
+  const [evaluation, setEvaluation] = useState(null);
+  const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(TOTAL_DURATION_SECONDS);
 
   const answerRef = useRef('');
+  const questionsRef = useRef([]);
+  const currentIndexRef = useRef(0);
+  const evaluationRef = useRef(null);
+  const submissionInProgressRef = useRef(false);
+  const sessionKeyRef = useRef(getInterviewSessionKey());
+  const mountedRef = useRef(true);
   answerRef.current = answer;
+  questionsRef.current = questions;
+  currentIndexRef.current = currentIndex;
+  evaluationRef.current = evaluation;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   // 1. Load questions (from localStorage or fetch as fallback)
   useEffect(() => {
@@ -96,22 +121,25 @@ export default function Interview() {
   }, []);
 
   const handleTimeExpired = () => {
-    // If the candidate had typed anything in the current answer, record it
+    // Preserve the current response even if time expires before AI evaluation completes.
     const currentTyped = answerRef.current.trim();
-    const cachedAnswers = JSON.parse(localStorage.getItem('interview_answers') || '[]');
-    
-    if (currentTyped && questions[currentIndex]) {
-      cachedAnswers.push({
-        question_id: questions[currentIndex].id,
-        question_number: currentIndex + 1,
-        question_title: questions[currentIndex].title,
+    const activeQuestions = questionsRef.current;
+    const activeIndex = currentIndexRef.current;
+    const activeQuestion = activeQuestions[activeIndex];
+
+    if (currentTyped && activeQuestion) {
+      const timedEntry = {
+        question_id: activeQuestion.id,
+        question_number: activeIndex + 1,
+        question_title: activeQuestion.title,
         answer: currentTyped,
-        submitted_at: new Date().toISOString()
-      });
-      localStorage.setItem('interview_answers', JSON.stringify(cachedAnswers));
+        submitted_at: new Date().toISOString(),
+        evaluation: evaluationRef.current,
+        evaluation_status: evaluationRef.current ? 'complete' : 'draft'
+      };
+      saveInterviewAnswer(timedEntry, sessionKeyRef.current);
     }
-    
-    localStorage.setItem('questions_answered', cachedAnswers.length.toString());
+
     navigate('/result');
   };
 
@@ -129,43 +157,91 @@ export default function Interview() {
 
   const isLastQuestion = currentIndex >= (questions.length - 1) && questions.length > 0;
 
-  // 3. Handle Submit Answer and progression
-  const handleSubmit = (e) => {
+  // Restore answer/evaluation or draft when the page is refreshed mid-question.
+  useEffect(() => {
+    if (!questions.length) return;
+    const cached = readInterviewAnswers();
+    const existing = cached.find((item) => item.question_id === currentQuestion.id);
+    if (existing?.evaluation) {
+      setAnswer(existing.answer || '');
+      setEvaluation(existing.evaluation);
+    } else if (existing?.evaluation_status === 'draft' && existing.answer) {
+      // Restore a submitted draft whose evaluation failed before success
+      setAnswer(existing.answer);
+      setEvaluation(null);
+    }
+  }, [questions, currentIndex, currentQuestion.id]);
+
+  // 3. Evaluate the current answer before allowing progression.
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!answer.trim() || isSubmitting) return;
+    const submittedAnswer = answer.trim();
 
+    if (!submittedAnswer) {
+      setSubmitError('Please enter an answer before requesting evaluation.');
+      return;
+    }
+    if (submissionInProgressRef.current || isSubmitting || evaluation) return;
+
+    submissionInProgressRef.current = true;
     setIsSubmitting(true);
+    setSubmitError('');
 
-    // Retrieve existing answers array
-    const cachedAnswers = JSON.parse(localStorage.getItem('interview_answers') || '[]');
-
-    // Append current response
-    const newEntry = {
+    // Persist the draft immediately so a refresh or failure does not lose it.
+    const draftEntry = {
       question_id: currentQuestion.id,
       question_number: currentIndex + 1,
       question_title: currentQuestion.title,
-      answer: answer.trim(),
-      submitted_at: new Date().toISOString()
+      answer: submittedAnswer,
+      submitted_at: new Date().toISOString(),
+      evaluation: null,
+      evaluation_status: 'draft'
     };
+    saveInterviewAnswer(draftEntry, sessionKeyRef.current);
 
-    const updatedAnswers = [...cachedAnswers, newEntry];
-    localStorage.setItem('interview_answers', JSON.stringify(updatedAnswers));
-    localStorage.setItem('questions_answered', updatedAnswers.length.toString());
+    // Snapshot the session key so we can guard against late responses.
+    const submissionSessionKey = sessionKeyRef.current;
 
-    // Check if more questions remain
-    if (currentIndex + 1 < questions.length) {
-      const nextIndex = currentIndex + 1;
-      setCurrentIndex(nextIndex);
-      localStorage.setItem('current_question_index', nextIndex.toString());
-      setAnswer('');
-      setIsSubmitting(false);
-    } else {
-      // Completed all 5 questions -> navigate to Result
-      setTimeout(() => {
-        setIsSubmitting(false);
-        navigate('/result');
-      }, 350);
+    try {
+      const result = await submitAnswerForEvaluation(
+        candidateRole,
+        currentQuestion.id,
+        submittedAnswer
+      );
+
+      // If the component unmounted or a new interview session started, discard.
+      if (!mountedRef.current || submissionSessionKey !== getInterviewSessionKey()) return;
+
+      const completedEntry = { ...draftEntry, evaluation: result, evaluation_status: 'complete' };
+      saveInterviewAnswer(completedEntry, submissionSessionKey);
+      if (mountedRef.current) {
+        setAnswer(submittedAnswer);
+        setEvaluation(result);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setSubmitError(error.message || 'Unable to evaluate your answer. Please retry.');
+      }
+    } finally {
+      submissionInProgressRef.current = false;
+      if (mountedRef.current) setIsSubmitting(false);
     }
+  };
+
+  const handleNextQuestion = () => {
+    if (!evaluation) return;
+
+    if (isLastQuestion) {
+      navigate('/result');
+      return;
+    }
+
+    const nextIndex = currentIndex + 1;
+    setCurrentIndex(nextIndex);
+    localStorage.setItem('current_question_index', nextIndex.toString());
+    setAnswer('');
+    setEvaluation(null);
+    setSubmitError('');
   };
 
   return (
@@ -253,33 +329,109 @@ export default function Interview() {
                 id="interviewAnswer"
                 rows={9}
                 value={answer}
-                onChange={(e) => setAnswer(e.target.value)}
+                onChange={(e) => {
+                  setAnswer(e.target.value);
+                  if (submitError) setSubmitError('');
+                }}
+                disabled={isSubmitting || Boolean(evaluation)}
                 placeholder="Type your technical answer here. Address key concepts, mechanisms, and implementation details..."
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-y leading-relaxed"
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-y leading-relaxed disabled:opacity-75 disabled:cursor-not-allowed"
                 required
               />
 
-              <div className="flex items-center justify-between pt-2">
+              {submitError && (
+                <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-sm text-rose-300">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>{submitError} Your answer has not been cleared.</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-4 pt-2">
                 <p className="text-xs text-slate-500">
-                  {isLastQuestion ? 'Final question. Submitting will complete the assessment.' : 'Answers are saved sequentially.'}
+                  {evaluation
+                    ? 'Evaluation complete. Review it before continuing.'
+                    : 'Your answer will remain available if AI evaluation fails.'}
                 </p>
 
-                <button
-                  type="submit"
-                  disabled={isSubmitting || !answer.trim()}
-                  className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>
-                    {isSubmitting 
-                      ? 'Saving...' 
-                      : isLastQuestion 
-                        ? 'Submit & Complete Interview' 
-                        : 'Submit & Next Question'}
-                  </span>
-                </button>
+                {!evaluation && (
+                  <button
+                    type="submit"
+                    disabled={isSubmitting || !answer.trim()}
+                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
+                  >
+                    {isSubmitting ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4" />
+                    )}
+                    <span>{isSubmitting ? 'Evaluating Answer...' : 'Submit for Evaluation'}</span>
+                  </button>
+                )}
               </div>
             </form>
+
+            {evaluation && (
+              <section className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-7 shadow-xl space-y-5" aria-live="polite">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wider text-indigo-400 mb-1">
+                      Interview Evaluation
+                    </div>
+                    <h3 className="text-xl font-bold text-white">AI Answer Review</h3>
+                  </div>
+                  <div className="flex items-baseline gap-1 px-4 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
+                    <span className="text-3xl font-extrabold text-indigo-300">{evaluation.score}</span>
+                    <span className="text-sm font-semibold text-slate-400">/10</span>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Feedback</h4>
+                  <p className="text-sm text-slate-200 leading-relaxed">{evaluation.feedback}</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400 mb-3">
+                      <TrendingUp className="w-4 h-4" /> Strengths
+                    </div>
+                    <ul className="space-y-2">
+                      {evaluation.strengths.map((strength, index) => (
+                        <li key={`${strength}-${index}`} className="flex items-start gap-2 text-xs text-slate-300">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
+                          <span>{strength}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-400 mb-3">
+                      <AlertCircle className="w-4 h-4" /> Areas for Improvement
+                    </div>
+                    <ul className="space-y-2">
+                      {evaluation.improvements.map((improvement, index) => (
+                        <li key={`${improvement}-${index}`} className="flex items-start gap-2 text-xs text-slate-300">
+                          <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
+                          <span>{improvement}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={handleNextQuestion}
+                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
+                  >
+                    <span>{isLastQuestion ? 'View Results' : 'Next Question'}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </section>
+            )}
 
           </div>
 

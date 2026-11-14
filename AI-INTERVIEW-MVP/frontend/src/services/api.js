@@ -68,6 +68,63 @@ export async function startInterviewSession(candidateName, role) {
   }
 }
 
+/** Read the existing local interview session without crashing on corrupt storage. */
+export function readInterviewAnswers() {
+  try {
+    const answers = JSON.parse(localStorage.getItem('interview_answers') || '[]');
+    return Array.isArray(answers)
+      ? answers.filter((item) => item && typeof item.question_id === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+// Start time is included because the backend may reuse a candidate's session ID.
+export function getInterviewSessionKey() {
+  return `${localStorage.getItem('interview_session_id') || ''}:${localStorage.getItem('interview_start_time') || ''}`;
+}
+
+/** Upsert one answer only into the session that originally submitted it. */
+export function saveInterviewAnswer(entry, sessionKey) {
+  if (getInterviewSessionKey() !== sessionKey) return false;
+  const answers = readInterviewAnswers();
+  const index = answers.findIndex((item) => item.question_id === entry.question_id);
+  if (index >= 0) answers[index] = entry;
+  else answers.push(entry);
+
+  localStorage.setItem('interview_answers', JSON.stringify(answers));
+  localStorage.setItem('questions_answered', String(
+    answers.filter((item) => item.evaluation_status !== 'draft').length
+  ));
+  // The storage event is cross-tab only; notify Result in this tab as well.
+  window.dispatchEvent(new Event('interview-answers-updated'));
+  return true;
+}
+
+/**
+ * Submit one candidate answer for AI evaluation.
+ * Uses a longer timeout because a local model may need time to load.
+ */
+export async function submitAnswerForEvaluation(role, questionId, answer) {
+  try {
+    const response = await client.post('/api/evaluation/evaluate', {
+      role,
+      question_id: questionId,
+      answer
+    }, {
+      timeout: 130000
+    });
+    return response.data;
+  } catch (error) {
+    const message = error.response?.data?.detail
+      || (error.code === 'ECONNABORTED'
+        ? 'AI evaluation timed out. Please retry your answer.'
+        : 'Unable to evaluate your answer. Check that the backend and Ollama are running.');
+    throw new Error(message);
+  }
+}
+
 /**
  * Fallback questions if backend is offline
  */

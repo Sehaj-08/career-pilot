@@ -22,27 +22,50 @@ export default function Result() {
   const [submittedAnswers, setSubmittedAnswers] = useState([]);
   const [expandedIndex, setExpandedIndex] = useState(0);
 
-  useEffect(() => {
-    const savedName = localStorage.getItem('candidate_name');
-    const savedRole = localStorage.getItem('candidate_role');
-    const rawAnswers = localStorage.getItem('interview_answers');
-
-    if (savedName) setCandidateName(savedName);
-    if (savedRole) setCandidateRole(savedRole);
-    if (rawAnswers) {
-      try {
+  function loadAnswers() {
+    try {
+      const rawAnswers = localStorage.getItem('interview_answers');
+      if (rawAnswers) {
         const parsed = JSON.parse(rawAnswers);
         if (Array.isArray(parsed)) {
           setSubmittedAnswers(parsed);
         }
-      } catch (e) {
-        console.warn('Error reading answers:', e);
       }
+    } catch (e) {
+      console.warn('Error reading answers:', e);
     }
+  }
+
+  useEffect(() => {
+    const savedName = localStorage.getItem('candidate_name');
+    const savedRole = localStorage.getItem('candidate_role');
+    if (savedName) setCandidateName(savedName);
+    if (savedRole) setCandidateRole(savedRole);
+    loadAnswers();
+
+    // Re-read storage if Interview writes a late evaluation after navigation.
+    window.addEventListener('interview-answers-updated', loadAnswers);
+    window.addEventListener('storage', loadAnswers);
+    return () => {
+      window.removeEventListener('interview-answers-updated', loadAnswers);
+      window.removeEventListener('storage', loadAnswers);
+    };
   }, []);
 
   const totalQuestions = 5;
   const questionsCount = submittedAnswers.length;
+  const evaluatedAnswers = submittedAnswers.filter(
+    (item) => item.evaluation && Number.isFinite(Number(item.evaluation.score))
+  );
+  const averageScore = evaluatedAnswers.length
+    ? evaluatedAnswers.reduce((sum, item) => sum + Number(item.evaluation.score), 0) / evaluatedAnswers.length
+    : null;
+  const combinedStrengths = [...new Set(
+    evaluatedAnswers.flatMap((item) => item.evaluation.strengths || [])
+  )];
+  const combinedImprovements = [...new Set(
+    evaluatedAnswers.flatMap((item) => item.evaluation.improvements || [])
+  )];
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 flex justify-center items-center">
@@ -62,7 +85,7 @@ export default function Result() {
                 Evaluation Summary
               </h1>
               <p className="text-sm text-slate-400 mt-1">
-                Overview of your 5 technical responses recorded for the {candidateRole} assessment.
+                AI evaluation summary for your {candidateRole} technical assessment.
               </p>
             </div>
 
@@ -109,33 +132,33 @@ export default function Result() {
           </div>
         </div>
 
-        {/* Score & Questions Summary Placeholders */}
+        {/* Score & Questions Summary */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
 
-          {/* Total Score Placeholder */}
+          {/* Average AI Score */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Total Score Placeholder
+                  Average AI Score
                 </span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                  Hour 3 Feature
+                  {evaluatedAnswers.length} Evaluated
                 </span>
               </div>
               <div className="flex items-baseline gap-2 mt-2">
                 <span className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-violet-400">
-                  --
+                  {averageScore === null ? '--' : averageScore.toFixed(1)}
                 </span>
-                <span className="text-lg text-slate-500 font-medium">/ 100</span>
+                <span className="text-lg text-slate-500 font-medium">/ 10</span>
               </div>
-              <div className="text-xs text-amber-400 mt-2 flex items-center gap-1.5 font-medium">
+              <div className={`text-xs mt-2 flex items-center gap-1.5 font-medium ${averageScore === null ? 'text-amber-400' : 'text-indigo-300'}`}>
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>AI scoring engine will compute scores in Hour 3</span>
+                <span>{averageScore === null ? 'No successfully evaluated answers' : 'Calculated from individual AI evaluation scores'}</span>
               </div>
             </div>
             <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
-              Evaluation metrics: Technical Depth, Relevance, Clarity
+              Evaluation dimensions: technical correctness, relevance, and completeness
             </div>
           </div>
 
@@ -158,7 +181,7 @@ export default function Result() {
               </div>
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1.5 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>All {questionsCount} responses preserved for AI evaluation</span>
+                <span>{evaluatedAnswers.length} of {questionsCount} preserved responses evaluated</span>
               </div>
             </div>
             <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
@@ -195,7 +218,7 @@ export default function Result() {
                       onClick={() => setExpandedIndex(isExpanded ? -1 : index)}
                       className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-900/50 transition-colors"
                     >
-                      <div className="flex items-center gap-3 pr-4">
+                      <div className="flex items-center gap-3 pr-4 min-w-0">
                         <span className="w-6 h-6 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold flex items-center justify-center flex-shrink-0">
                           {index + 1}
                         </span>
@@ -203,19 +226,60 @@ export default function Result() {
                           {item.question_title}
                         </span>
                       </div>
-                      {isExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                      )}
+                      <div className="flex items-center gap-3 flex-shrink-0">
+                        {item.evaluation ? (
+                          <span className="text-sm font-bold text-indigo-300">{item.evaluation.score}/10</span>
+                        ) : (
+                          <span className="text-[10px] font-semibold uppercase text-amber-400">Not evaluated</span>
+                        )}
+                        {isExpanded ? (
+                          <ChevronUp className="w-4 h-4 text-slate-400" />
+                        ) : (
+                          <ChevronDown className="w-4 h-4 text-slate-400" />
+                        )}
+                      </div>
                     </button>
 
                     {isExpanded && (
-                      <div className="px-4 pb-4 pt-2 border-t border-slate-900 space-y-2">
-                        <div className="text-xs text-slate-500 font-medium">Candidate Answer:</div>
-                        <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800 whitespace-pre-wrap">
-                          {item.answer}
-                        </p>
+                      <div className="px-4 pb-4 pt-3 border-t border-slate-900 space-y-4">
+                        <div>
+                          <div className="text-xs text-slate-500 font-medium mb-2">Candidate Answer:</div>
+                          <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800 whitespace-pre-wrap">
+                            {item.answer}
+                          </p>
+                        </div>
+
+                        {item.evaluation ? (
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-xs text-slate-500 font-medium mb-1">AI Feedback:</div>
+                              <p className="text-xs text-slate-300 leading-relaxed">{item.evaluation.feedback}</p>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/20">
+                                <div className="text-xs font-semibold text-emerald-400 mb-2">Strengths</div>
+                                <ul className="space-y-1 text-xs text-slate-300 list-disc list-inside">
+                                  {(item.evaluation.strengths || []).map((strength, strengthIndex) => (
+                                    <li key={`${strength}-${strengthIndex}`}>{strength}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                                <div className="text-xs font-semibold text-amber-400 mb-2">Improvements</div>
+                                <ul className="space-y-1 text-xs text-slate-300 list-disc list-inside">
+                                  {(item.evaluation.improvements || []).map((improvement, improvementIndex) => (
+                                    <li key={`${improvement}-${improvementIndex}`}>{improvement}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
+                            This response was preserved without an AI score, for example because time expired or evaluation failed.
+                          </div>
+                        )}
+
                         <div className="text-[10px] text-slate-500 text-right">
                           Submitted at: {new Date(item.submitted_at).toLocaleTimeString()}
                         </div>
@@ -235,44 +299,44 @@ export default function Result() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
             <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
               <TrendingUp className="w-4 h-4" />
-              <span>Observed Strengths (Placeholder)</span>
+              <span>Observed Strengths</span>
             </div>
-            <ul className="space-y-3 text-xs text-slate-300">
-              <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Demonstrated clear understanding of core {candidateRole} responsibilities.</span>
-              </li>
-              <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Completed all {questionsCount} technical questions within the allotted duration.</span>
-              </li>
-              <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Structured articulation of architecture patterns and implementation trade-offs.</span>
-              </li>
-            </ul>
+            {combinedStrengths.length ? (
+              <ul className="space-y-3 text-xs text-slate-300">
+                {combinedStrengths.map((strength, index) => (
+                  <li key={`${strength}-${index}`} className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                    <span>{strength}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 text-xs text-slate-400">
+                No AI-evaluated strengths are available.
+              </p>
+            )}
           </div>
 
           {/* Areas for Improvement Section */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
             <div className="flex items-center gap-2 text-amber-400 font-semibold text-sm">
               <AlertCircle className="w-4 h-4" />
-              <span>Areas for Improvement (Placeholder)</span>
+              <span>Areas for Improvement</span>
             </div>
-            <ul className="space-y-3 text-xs text-slate-300">
-              <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <span>Incorporate specific metric-driven outcomes and production system benchmarks.</span>
-              </li>
-              <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <span>Provide deeper trade-off analysis between tooling options for {candidateRole}.</span>
-              </li>
-              <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
-                <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <span>Elaborate further on incident response and edge-case handling scenarios.</span>
-              </li>
-            </ul>
+            {combinedImprovements.length ? (
+              <ul className="space-y-3 text-xs text-slate-300">
+                {combinedImprovements.map((improvement, index) => (
+                  <li key={`${improvement}-${index}`} className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
+                    <AlertCircle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <span>{improvement}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="p-3 rounded-xl bg-slate-950/60 border border-slate-800/80 text-xs text-slate-400">
+                No AI-evaluated improvement areas are available.
+              </p>
+            )}
           </div>
 
         </div>

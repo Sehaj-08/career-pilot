@@ -48,7 +48,7 @@ def get_all_questions(public_only: bool = True) -> List[Dict[str, Any]]:
     all_questions = load_all_raw_questions()
     if not public_only:
         return all_questions
-    
+
     return [
         {
             "id": q.get("id"),
@@ -57,3 +57,15 @@ def get_all_questions(public_only: bool = True) -> List[Dict[str, Any]]:
         }
         for q in all_questions
     ]
+
+
+def get_question_by_role_and_id(role: str, question_id: str) -> Optional[Dict[str, Any]]:
+    """Return one complete question for internal backend use only."""
+    return next(
+        (
+            question
+            for question in load_all_raw_questions()
+            if question.get("role") == role and question.get("id") == question_id
+        ),
+        None,
+    )

@@ -48,5 +48,5 @@ def root():
 # Hour 2+ routes (supports both /api/interview and /interview)
 app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
 app.include_router(interview.router, prefix="/interview", tags=["Interview"])
-app.include_router(evaluation.router, prefix="/evaluation", tags=["Evaluation"])
+app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
 app.include_router(results.router, prefix="/results", tags=["Results"])
