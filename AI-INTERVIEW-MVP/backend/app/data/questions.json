@@ -1,26 +1,184 @@
 [
   {
-    "id": 1,
-    "title": "Explain the difference between synchronous and asynchronous execution in JavaScript.",
-    "category": "Frontend / JavaScript",
-    "difficulty": "Easy"
+    "id": "devops_1",
+    "role": "DevOps Engineer",
+    "title": "Explain how you would design a zero-downtime CI/CD deployment pipeline using Kubernetes and Canary or Blue-Green strategies.",
+    "reference_answer": "A robust zero-downtime pipeline uses automated linting, unit tests, and container image builds with immutable tags. Kubernetes deployments manage Canary rollouts by initially shifting 5-10% of traffic using ingress controllers (e.g. Istio, NGINX) or Argo Rollouts, validating health and error rates before full promotion, and triggering automated rollbacks if threshold violations occur.",
+    "evaluation_concepts": [
+      "CI/CD pipeline automation",
+      "Immutable container tagging",
+      "Canary vs Blue-Green trade-offs",
+      "Ingress/Service traffic splitting",
+      "Automated health checks and rollback mechanisms"
+    ]
   },
   {
-    "id": 2,
-    "title": "What are the key trade-offs between relational databases and document stores?",
-    "category": "Database",
-    "difficulty": "Medium"
+    "id": "devops_2",
+    "role": "DevOps Engineer",
+    "title": "How do you manage Infrastructure as Code (IaC) state files and handle configuration drift in Terraform across team environments?",
+    "reference_answer": "Terraform state should be stored remotely in backend storage like AWS S3 or Google Cloud Storage with state locking enabled via DynamoDB or native GCS locking. Configuration drift is identified by scheduled CI drift detection jobs (terraform plan -detailed-exitcode) and addressed through automated reconciliation or PR-driven approval workflows.",
+    "evaluation_concepts": [
+      "Remote state storage and encryption",
+      "State locking to prevent race conditions",
+      "Drift detection and reconciliation",
+      "Workspaces or module separation per environment"
+    ]
   },
   {
-    "id": 3,
-    "title": "How do you secure REST APIs against common vulnerabilities like CSRF and XSS?",
-    "category": "Security & Architecture",
-    "difficulty": "Medium"
+    "id": "devops_3",
+    "role": "DevOps Engineer",
+    "title": "What are the key security and optimization practices you follow when creating production-grade Docker containers?",
+    "reference_answer": "Best practices include using minimal base images (Alpine or distroless), implementing multi-stage builds to exclude build tools and dev dependencies from final images, running containers as non-root users, scanning images with tools like Trivy or Clair, pinning dependency versions, and avoiding baking sensitive credentials or environment secrets into image layers.",
+    "evaluation_concepts": [
+      "Multi-stage Docker builds",
+      "Minimal and distroless base images",
+      "Non-root container execution",
+      "Vulnerability scanning",
+      "Secret management avoidance in layers"
+    ]
   },
   {
-    "id": 4,
-    "title": "Describe how you design a system for handling 10,000 concurrent websocket connections.",
-    "category": "System Design",
-    "difficulty": "Hard"
+    "id": "devops_4",
+    "role": "DevOps Engineer",
+    "title": "Describe an end-to-end observability architecture using Prometheus and Grafana for monitoring a microservices cluster.",
+    "reference_answer": "Microservices expose metrics in Prometheus format via /metrics endpoints. Prometheus scrapes targets dynamically via service discovery (e.g. Kubernetes SD), stores time-series data, and evaluates alert rules. Alertmanager routes alerts via PagerDuty/Slack, while Grafana visualizes RED metrics (Rate, Errors, Duration) and resource utilization dashboards.",
+    "evaluation_concepts": [
+      "Prometheus metric scraping and Kubernetes service discovery",
+      "RED / USE monitoring methodologies",
+      "Alertmanager routing and notification thresholds",
+      "Grafana dashboard visualization"
+    ]
+  },
+  {
+    "id": "devops_5",
+    "role": "DevOps Engineer",
+    "title": "How would you design a disaster recovery (DR) strategy with minimal RTO and RPO for cloud infrastructure and databases?",
+    "reference_answer": "A solid DR plan categorizes systems by RTO/RPO requirements. Strategies range from Pilot Light to Multi-Region Active-Active. Data replication uses cross-region automated snapshots and streaming replication. Infrastructure is codified in Terraform for rapid recovery, DNS failover is orchestrated with Route53 health checks, and periodic DR drill tests validate recoverability.",
+    "evaluation_concepts": [
+      "Understanding RTO (Recovery Time Objective) and RPO (Recovery Point Objective)",
+      "Cross-region replication and backup automation",
+      "DNS failover mechanisms",
+      "Automated infrastructure recreation via IaC"
+    ]
+  },
+  {
+    "id": "backend_1",
+    "role": "Backend Developer",
+    "title": "Explain the architectural trade-offs between RESTful APIs, GraphQL, and gRPC in modern backend systems.",
+    "reference_answer": "REST is simple, standard, and heavily cacheable via HTTP proxies, but suffers from over-fetching or under-fetching. GraphQL provides client-driven field querying and aggregated responses in a single request, but complicates caching and performance monitoring. gRPC utilizes HTTP/2 and Protocol Buffers for high-throughput, low-latency binary microservice communication with strict typed contracts, but lacks native browser support without proxies.",
+    "evaluation_concepts": [
+      "HTTP method semantics and HTTP-level caching in REST",
+      "Over-fetching vs under-fetching in GraphQL",
+      "Protobuf serialization and HTTP/2 multiplexing in gRPC",
+      "Appropriate use case selection"
+    ]
+  },
+  {
+    "id": "backend_2",
+    "role": "Backend Developer",
+    "title": "How do database indexes work internally (e.g., B-Trees), and how do you diagnose and resolve a slow SQL query in production?",
+    "reference_answer": "B-Tree indexes maintain balanced, sorted tree structures allowing O(log N) lookups, range scans, and sort operations. Slow queries are diagnosed using EXPLAIN / EXPLAIN ANALYZE to inspect execution plans for sequential table scans or missing indexes, inspecting slow query logs, eliminating N+1 queries, creating composite indexes matching query predicates, and tuning buffer pools.",
+    "evaluation_concepts": [
+      "B-Tree index structure and logarithmic search complexity",
+      "EXPLAIN ANALYZE query plan reading",
+      "Sequential table scans vs index seeks",
+      "Composite index column order"
+    ]
+  },
+  {
+    "id": "backend_3",
+    "role": "Backend Developer",
+    "title": "Describe distributed caching strategies using Redis, and how you mitigate issues like cache stampede and stale data.",
+    "reference_answer": "Common patterns include Cache-Aside (Lazy Loading) and Write-Through. Stale data is managed with TTLs and event-driven invalidation. Cache stampede (thundering herd) occurs when a popular key expires; it is mitigated using distributed mutex locks, probabilistic early expiration (XFetch algorithm), or background asynchronous cache refreshing.",
+    "evaluation_concepts": [
+      "Cache-aside vs write-through patterns",
+      "Cache invalidation strategies and TTLs",
+      "Cache stampede mitigation (mutex locks, early refresh)",
+      "Redis memory eviction policies"
+    ]
+  },
+  {
+    "id": "backend_4",
+    "role": "Backend Developer",
+    "title": "How do you design an asynchronous, event-driven architecture using message queues like Kafka or RabbitMQ?",
+    "reference_answer": "Producer services publish domain events to message queues or Kafka topic partitions. Consumers process events asynchronously to decouple workload spikes. Key design considerations include idempotent consumer processing to handle at-least-once delivery, dead-letter queues (DLQ) for failed messages, and outbox patterns to guarantee consistency between database writes and message emission.",
+    "evaluation_concepts": [
+      "Message queue vs streaming log distinctions (RabbitMQ vs Kafka)",
+      "Idempotency in consumer processing",
+      "Transactional outbox pattern",
+      "Dead Letter Queues (DLQ) and retry policies"
+    ]
+  },
+  {
+    "id": "backend_5",
+    "role": "Backend Developer",
+    "title": "What are the best practices for securing backend APIs with JWT and OAuth2, and protecting against common vulnerabilities like SQL injection and CSRF?",
+    "reference_answer": "Security best practices involve short-lived access tokens and secure refresh token rotation, validating token signatures, audience, and issuer. Protection against SQL injection requires parameterized queries or ORMs. CSRF is mitigated with SameSite cookie attributes and anti-CSRF tokens. Additional requirements include rate limiting, TLS enforcement, input sanitization, and structured role-based access control (RBAC).",
+    "evaluation_concepts": [
+      "JWT expiration and refresh token rotation",
+      "Parameterized queries preventing SQL injection",
+      "SameSite cookies and CSRF defenses",
+      "Rate limiting and input validation"
+    ]
+  },
+  {
+    "id": "frontend_1",
+    "role": "Frontend Developer",
+    "title": "Explain how React's Virtual DOM and Reconciliation algorithm (Fiber) work, and how you optimize unnecessary re-renders.",
+    "reference_answer": "React creates an in-memory Virtual DOM tree representation. When state changes, a new tree is created and diffed against the previous tree using the Fiber reconciliation algorithm (O(N) heuristic diffing). Unnecessary re-renders are prevented by memoizing components with React.memo, caching callbacks and values with useCallback and useMemo, lifting state appropriately, and stabilizing object references.",
+    "evaluation_concepts": [
+      "Virtual DOM diffing and Fiber architecture",
+      "Re-render triggers vs DOM mutations",
+      "React.memo, useMemo, and useCallback use cases",
+      "Proper key prop usage in lists"
+    ]
+  },
+  {
+    "id": "frontend_2",
+    "role": "Frontend Developer",
+    "title": "How do you choose between local state, Context API, and external global state libraries (like Zustand or Redux) in large applications?",
+    "reference_answer": "Local state (useState/useReducer) handles isolated component concerns. Context API is ideal for low-frequency global data such as themes or current user profiles, but triggers re-renders across all consumers unless carefully split. External state stores like Zustand or Redux Toolkit provide selector-based subscriptions to prevent unnecessary re-renders, middleware support, and predictable multi-step state transitions for complex workflows.",
+    "evaluation_concepts": [
+      "Component-level state isolation",
+      "Context API re-render cascading limitations",
+      "Selector-based subscriptions in Zustand/Redux",
+      "State normalization and immutability"
+    ]
+  },
+  {
+    "id": "frontend_3",
+    "role": "Frontend Developer",
+    "title": "What strategies and metrics do you use to measure and optimize Core Web Vitals (LCP, INP/FID, CLS) in a web application?",
+    "reference_answer": "Metrics: LCP (Largest Contentful Paint), INP (Interaction to Next Paint), and CLS (Cumulative Layout Shift). LCP is optimized by image preloading, modern formats (WebP/AVIF), and CDN caching. INP is improved by breaking long tasks, yielding to the main thread with web workers or requestIdleCallback, and deferring non-essential scripts. CLS is resolved by reserving aspect ratios and explicit dimensions for media and dynamic widgets.",
+    "evaluation_concepts": [
+      "Core Web Vitals definitions (LCP, INP, CLS)",
+      "Code splitting and lazy loading (React.lazy/dynamic imports)",
+      "Dimension reservations to prevent layout shifts",
+      "Minimizing main-thread blocking time"
+    ]
+  },
+  {
+    "id": "frontend_4",
+    "role": "Frontend Developer",
+    "title": "How do you handle asynchronous data fetching, caching, and race conditions when multiple API requests are fired rapidly?",
+    "reference_answer": "Race conditions occur when an earlier slow request resolves after a later fast request. This is solved by using AbortController to cancel superseded fetch requests, leveraging libraries like TanStack Query (React Query) for automatic request deduplication and caching, or tracking request sequence IDs inside useEffect cleanup functions.",
+    "evaluation_concepts": [
+      "AbortController and request cancellation",
+      "Handling asynchronous race conditions",
+      "Server state caching vs client state",
+      "Optimistic UI updates and rollback handling"
+    ]
+  },
+  {
+    "id": "frontend_5",
+    "role": "Frontend Developer",
+    "title": "Describe essential web security practices on the frontend, specifically mitigating Cross-Site Scripting (XSS) and implementing Content Security Policy (CSP).",
+    "reference_answer": "XSS occurs when malicious scripts execute in the browser. Mitigation includes relying on React's automatic JSX string escaping, avoiding dangerous sinks like dangerouslySetInnerHTML without DOMPurify, storing sensitive tokens in HTTP-only SameSite cookies rather than localStorage, and enforcing strict Content Security Policy (CSP) headers to restrict script execution sources.",
+    "evaluation_concepts": [
+      "XSS vectors (Stored, Reflected, DOM-based)",
+      "Context-aware output encoding and sanitization (DOMPurify)",
+      "Content Security Policy (CSP) headers",
+      "Secure storage of auth tokens (HttpOnly cookies vs localStorage)"
+    ]
   }
 ]

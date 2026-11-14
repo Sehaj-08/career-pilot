@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  Award, 
   User, 
   Briefcase, 
   CheckCircle2, 
@@ -9,25 +8,41 @@ import {
   AlertCircle, 
   ArrowLeft,
   Calendar,
-  Sparkles
+  Sparkles,
+  FileText,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 export default function Result() {
   const navigate = useNavigate();
 
   const [candidateName, setCandidateName] = useState('Candidate');
-  const [candidateRole, setCandidateRole] = useState('Software Engineer');
-  const [questionsAnswered, setQuestionsAnswered] = useState(1);
+  const [candidateRole, setCandidateRole] = useState('Backend Developer');
+  const [submittedAnswers, setSubmittedAnswers] = useState([]);
+  const [expandedIndex, setExpandedIndex] = useState(0);
 
   useEffect(() => {
     const savedName = localStorage.getItem('candidate_name');
     const savedRole = localStorage.getItem('candidate_role');
-    const savedAnswered = localStorage.getItem('questions_answered');
+    const rawAnswers = localStorage.getItem('interview_answers');
 
     if (savedName) setCandidateName(savedName);
     if (savedRole) setCandidateRole(savedRole);
-    if (savedAnswered) setQuestionsAnswered(parseInt(savedAnswered, 10));
+    if (rawAnswers) {
+      try {
+        const parsed = JSON.parse(rawAnswers);
+        if (Array.isArray(parsed)) {
+          setSubmittedAnswers(parsed);
+        }
+      } catch (e) {
+        console.warn('Error reading answers:', e);
+      }
+    }
   }, []);
+
+  const totalQuestions = 5;
+  const questionsCount = submittedAnswers.length;
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 flex justify-center items-center">
@@ -41,19 +56,19 @@ export default function Result() {
             <div>
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold mb-3">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Interview Session Complete</span>
+                <span>Interview Session Completed</span>
               </div>
               <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
                 Evaluation Summary
               </h1>
               <p className="text-sm text-slate-400 mt-1">
-                Overview of submitted responses and placeholder evaluation metrics for Hour 1.
+                Overview of your 5 technical responses recorded for the {candidateRole} assessment.
               </p>
             </div>
 
             <button
               onClick={() => navigate('/dashboard')}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-slate-200 text-sm font-semibold border border-slate-700/70 transition-colors self-start sm:self-center"
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700/80 text-slate-200 text-sm font-semibold border border-slate-700/70 transition-colors self-start sm:self-center active:scale-[0.98]"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>Back to Dashboard</span>
@@ -124,7 +139,7 @@ export default function Result() {
             </div>
           </div>
 
-          {/* Questions Answered Placeholder */}
+          {/* Questions Answered */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-3">
@@ -137,20 +152,80 @@ export default function Result() {
               </div>
               <div className="flex items-baseline gap-2 mt-2">
                 <span className="text-4xl font-extrabold text-white">
-                  {questionsAnswered}
+                  {questionsCount}
                 </span>
-                <span className="text-lg text-slate-500 font-medium">/ 1 Question</span>
+                <span className="text-lg text-slate-500 font-medium">/ {totalQuestions} Questions</span>
               </div>
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1.5 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Sample static response submitted successfully</span>
+                <span>All {questionsCount} responses preserved for AI evaluation</span>
               </div>
             </div>
             <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
-              Multi-question bank will unlock in Hour 2
+              Technical track: {candidateRole} (Hour 2)
             </div>
           </div>
 
+        </div>
+
+        {/* Submitted Answers Review Section */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-indigo-400 font-semibold text-sm">
+              <FileText className="w-4 h-4" />
+              <span>Submitted Responses Review ({submittedAnswers.length})</span>
+            </div>
+            <span className="text-xs text-slate-400">Preserved in session memory</span>
+          </div>
+
+          {submittedAnswers.length === 0 ? (
+            <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800 text-xs text-slate-400 text-center">
+              No answers recorded yet. Complete an interview to view submitted responses.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {submittedAnswers.map((item, index) => {
+                const isExpanded = expandedIndex === index;
+                return (
+                  <div 
+                    key={item.question_id || index}
+                    className="rounded-xl bg-slate-950/80 border border-slate-800/80 overflow-hidden"
+                  >
+                    <button
+                      onClick={() => setExpandedIndex(isExpanded ? -1 : index)}
+                      className="w-full p-4 flex items-center justify-between text-left hover:bg-slate-900/50 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 pr-4">
+                        <span className="w-6 h-6 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold flex items-center justify-center flex-shrink-0">
+                          {index + 1}
+                        </span>
+                        <span className="text-sm font-medium text-slate-200 line-clamp-1">
+                          {item.question_title}
+                        </span>
+                      </div>
+                      {isExpanded ? (
+                        <ChevronUp className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                      )}
+                    </button>
+
+                    {isExpanded && (
+                      <div className="px-4 pb-4 pt-2 border-t border-slate-900 space-y-2">
+                        <div className="text-xs text-slate-500 font-medium">Candidate Answer:</div>
+                        <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-3 rounded-lg border border-slate-800 whitespace-pre-wrap">
+                          {item.answer}
+                        </p>
+                        <div className="text-[10px] text-slate-500 text-right">
+                          Submitted at: {new Date(item.submitted_at).toLocaleTimeString()}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Strengths and Areas for Improvement Sections */}
@@ -169,11 +244,11 @@ export default function Result() {
               </li>
               <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>Structured articulation of technical experience and prior projects.</span>
+                <span>Completed all {questionsCount} technical questions within the allotted duration.</span>
               </li>
               <li className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-950/60 border border-slate-800/80">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span>High candidate focus maintained throughout the allocated interview window.</span>
+                <span>Structured articulation of architecture patterns and implementation trade-offs.</span>
               </li>
             </ul>
           </div>

@@ -7,12 +7,11 @@ import {
   Play, 
   Server, 
   CheckCircle2, 
-  XCircle, 
   RefreshCw,
-  AlertTriangle,
-  Layers
+  Layers,
+  Loader2
 } from 'lucide-react';
-import { checkBackendHealth } from '../services/api';
+import { checkBackendHealth, fetchQuestionsByRole, startInterviewSession } from '../services/api';
 
 const JOB_ROLES = [
   'DevOps Engineer',
@@ -26,6 +25,7 @@ export default function Dashboard() {
   // Retrieve stored state or fallback
   const [candidateName, setCandidateName] = useState('');
   const [selectedRole, setSelectedRole] = useState(JOB_ROLES[0]);
+  const [isStarting, setIsStarting] = useState(false);
   
   // Backend health status state
   const [backendStatus, setBackendStatus] = useState('checking'); // 'checking' | 'connected' | 'disconnected'
@@ -37,7 +37,6 @@ export default function Dashboard() {
     if (savedName) {
       setCandidateName(savedName);
     } else {
-      // If someone lands directly on Dashboard without a name, default or allow prompt
       setCandidateName('Candidate');
     }
 
@@ -62,14 +61,34 @@ export default function Dashboard() {
     setIsCheckingHealth(false);
   };
 
-  const handleStartInterview = () => {
-    // Save configuration to localStorage
-    localStorage.setItem('candidate_name', candidateName || 'Candidate');
-    localStorage.setItem('candidate_role', selectedRole);
-    localStorage.setItem('interview_duration', '30'); // Fixed at 30 minutes
-    
-    // Navigate to Interview screen
-    navigate('/interview');
+  const handleStartInterview = async () => {
+    setIsStarting(true);
+    try {
+      const activeName = candidateName.trim() || 'Candidate';
+
+      // 1. Fetch the 5 predefined questions for the chosen job role
+      const questions = await fetchQuestionsByRole(selectedRole);
+
+      // 2. Start session on the backend
+      const sessionData = await startInterviewSession(activeName, selectedRole);
+
+      // 3. Persist session state in localStorage
+      localStorage.setItem('candidate_name', activeName);
+      localStorage.setItem('candidate_role', selectedRole);
+      localStorage.setItem('interview_duration', '30'); // Fixed at 30 minutes
+      localStorage.setItem('interview_session_id', sessionData.session_id || `sess_${Date.now()}`);
+      localStorage.setItem('interview_questions', JSON.stringify(questions));
+      localStorage.setItem('interview_start_time', Date.now().toString());
+      localStorage.setItem('current_question_index', '0');
+      localStorage.setItem('interview_answers', JSON.stringify([]));
+      localStorage.setItem('questions_answered', '0');
+
+      // 4. Navigate to the functional Interview screen
+      navigate('/interview');
+    } catch (error) {
+      console.error('Failed to start interview:', error);
+      setIsStarting(false);
+    }
   };
 
   return (
@@ -187,7 +206,7 @@ export default function Dashboard() {
             </div>
 
             <p className="text-xs text-slate-500 leading-relaxed">
-              Assessment questions will be tailored to the core competencies of the selected position.
+              Assessment questions will be tailored to the core competencies of the selected position (5 technical questions).
             </p>
           </div>
 
@@ -212,7 +231,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="text-xs text-slate-400 sm:text-right max-w-xs">
-            Standardized time for every candidate. A live countdown will display once you begin.
+            Standardized time for every candidate. A persistent live countdown will display once you begin.
           </div>
         </div>
 
@@ -220,10 +239,20 @@ export default function Dashboard() {
         <div className="pt-2">
           <button
             onClick={handleStartInterview}
-            className="w-full py-4 px-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-2xl text-base shadow-xl shadow-indigo-600/25 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"
+            disabled={isStarting}
+            className="w-full py-4 px-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-75 disabled:cursor-not-allowed text-white font-bold rounded-2xl text-base shadow-xl shadow-indigo-600/25 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"
           >
-            <Play className="w-5 h-5 fill-white" />
-            <span>Start Interview</span>
+            {isStarting ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Loading Questions...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-5 h-5 fill-white" />
+                <span>Start Interview</span>
+              </>
+            )}
           </button>
         </div>
 
