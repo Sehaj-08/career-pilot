@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from app.routes import interview, evaluation, results
+from app.routes import interview, evaluation, results, voice_interview
 from app.database.db import init_db
 
 load_dotenv()
@@ -57,3 +57,4 @@ app.include_router(interview.router, prefix="/interview", tags=["Interview"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
 app.include_router(results.router, prefix="/api/results", tags=["Results"])
 app.include_router(results.router, prefix="/results", tags=["Results"])
+app.include_router(voice_interview.router, tags=["Voice Interview"])

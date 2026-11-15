@@ -39,6 +39,10 @@ import { buildInterviewReport } from '../utils/scoreCalculator';
 import WebcamMonitor from '../components/WebcamMonitor';
 import MonitoringPanel from '../components/MonitoringPanel';
 import TerminationModal from '../components/TerminationModal';
+import { useVoiceInterview } from '../hooks/useVoiceInterview';
+import AudioVisualizer from '../components/AudioVisualizer';
+import VoiceTranscript from '../components/VoiceTranscript';
+import VoiceControls from '../components/VoiceControls';
 
 const TOTAL_DURATION_SECONDS = 30 * 60;
 const TOTAL_QUESTIONS = 5;
@@ -104,6 +108,24 @@ export default function Interview() {
   });
 
   const { videoRef, isCameraActive, error, faceCount, stopWebcam } = useWebcam(handleCameraViolation);
+
+  // Live ElevenLabs Voice Interview hook
+  const {
+    status: voiceStatus,
+    isConnected: isVoiceConnected,
+    isMuted,
+    audioVolume,
+    candidateTranscript,
+    currentInterviewerSentence,
+    conversationHistory,
+    toggleMute,
+    finishSpeaking,
+    interrupt,
+  } = useVoiceInterview({
+    sessionId: interviewId,
+    role: candidateRole,
+    candidateName,
+  });
 
   // Sync webcam face metrics with monitoring hook
   useEffect(() => {
@@ -647,156 +669,43 @@ export default function Interview() {
               </p>
             </div>
 
-            {/* Answer form (Controlled Textarea - Protected from Copy/Paste/Cut) */}
-            <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <label htmlFor="interviewAnswer" className="text-sm font-semibold text-slate-200">
-                  Your Response
-                </label>
-                <span className="text-xs text-slate-400">
-                  {answer.trim() ? `${answer.trim().split(/\s+/).length} words` : '0 words'}
-                </span>
-              </div>
+            {/* ── Conversational Voice Room (ElevenLabs + Ollama) ── */}
+            <AudioVisualizer
+              status={voiceStatus}
+              audioVolume={audioVolume}
+            />
 
-              <textarea
-                id="interviewAnswer"
-                rows={9}
-                value={answer}
-                onChange={(e) => {
-                  setAnswer(e.target.value);
-                  if (submitError) setSubmitError('');
-                }}
-                disabled={isSubmitting || Boolean(evaluation)}
-                placeholder="Type your technical answer directly here. Address key concepts, mechanisms, and implementation details (Pasting is blocked)…"
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-y leading-relaxed disabled:opacity-75 disabled:cursor-not-allowed"
-                required
-              />
+            <VoiceTranscript
+              currentInterviewerSentence={currentInterviewerSentence}
+              candidateTranscript={candidateTranscript}
+              conversationHistory={conversationHistory}
+            />
 
-              {submitError && (
-                <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-sm text-rose-300">
-                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <span>{submitError} Your answer has not been cleared.</span>
-                </div>
-              )}
+            <VoiceControls
+              status={voiceStatus}
+              isMuted={isMuted}
+              onToggleMute={toggleMute}
+              onFinishSpeaking={finishSpeaking}
+              onInterrupt={interrupt}
+            />
 
-              <div className="flex items-center justify-between gap-4 pt-2">
-                <p className="text-xs text-slate-500">
-                  {evaluation
-                    ? 'Evaluation complete. Review it then continue.'
-                    : 'Your answer is saved immediately — a retry will not lose it.'}
-                </p>
+            {/* End / Wrap Up Interview */}
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-xs text-slate-500">
+                {conversationHistory.length > 0
+                  ? `${conversationHistory.length} turns recorded • Live proctoring active`
+                  : 'Speak into your microphone to begin the conversation'}
+              </span>
 
-                {!evaluation && (
-                  <button
-                    type="submit"
-                    disabled={isSubmitting || !answer.trim()}
-                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
-                  >
-                    {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                    <span>{isSubmitting ? 'Evaluating Answer…' : 'Submit for Evaluation'}</span>
-                  </button>
-                )}
-              </div>
-            </form>
-
-            {/* ── Evaluation card ── */}
-            {evaluation && (
-              <section
-                className="bg-slate-900 border border-indigo-500/30 rounded-2xl p-6 sm:p-7 shadow-xl space-y-5"
-                aria-live="polite"
+              <button
+                type="button"
+                onClick={() => finishAndPersistInterview()}
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors flex items-center gap-1.5"
               >
-                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-wider text-indigo-400 mb-1">
-                      Interview Evaluation
-                    </div>
-                    <h3 className="text-xl font-bold text-white">AI Answer Review</h3>
-                  </div>
-                  <div className="flex items-baseline gap-1 px-4 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20">
-                    <span className="text-3xl font-extrabold text-indigo-300">{evaluation.score}</span>
-                    <span className="text-sm font-semibold text-slate-400">/10</span>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Feedback</h4>
-                  <p className="text-sm text-slate-200 leading-relaxed">{evaluation.feedback}</p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="rounded-xl bg-emerald-500/5 border border-emerald-500/20 p-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-emerald-400 mb-3">
-                      <TrendingUp className="w-4 h-4" /> Strengths
-                    </div>
-                    {evaluation.strengths.length > 0 ? (
-                      <ul className="space-y-2">
-                        {evaluation.strengths.map((s, i) => (
-                          <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 mt-0.5 flex-shrink-0" />
-                            <span>{s}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-xs text-slate-400">No specific technical strengths identified.</p>
-                    )}
-                  </div>
-
-                  <div className="rounded-xl bg-amber-500/5 border border-amber-500/20 p-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-amber-400 mb-3">
-                      <AlertCircle className="w-4 h-4" /> Areas for Improvement
-                    </div>
-                    {evaluation.improvements.length > 0 ? (
-                      <ul className="space-y-2">
-                        {evaluation.improvements.map((imp, i) => (
-                          <li key={i} className="flex items-start gap-2 text-xs text-slate-300">
-                            <ArrowRight className="w-3.5 h-3.5 text-amber-400 mt-0.5 flex-shrink-0" />
-                            <span>{imp}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : (
-                      <p className="text-xs text-slate-400">No significant gaps identified.</p>
-                    )}
-                  </div>
-                </div>
-
-                {!isLastQuestion && (
-                  <div className="pt-1 text-xs text-indigo-300/70 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5" />
-                    <span>
-                      {evaluation.score < 5
-                        ? 'Next question will be easier to consolidate the fundamentals.'
-                        : evaluation.score <= 7
-                          ? 'Next question will be at a similar difficulty.'
-                          : 'Great answer! Next question will be harder.'}
-                    </span>
-                  </div>
-                )}
-
-                {nextQError && (
-                  <div className="flex items-start gap-2 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-sm text-rose-300">
-                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                    <span>{nextQError}</span>
-                  </div>
-                )}
-
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    onClick={handleNextQuestion}
-                    disabled={isGenerating}
-                    className="px-6 py-3 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm shadow-lg shadow-indigo-600/25 transition-all flex items-center gap-2 active:scale-[0.99]"
-                  >
-                    {isGenerating ? (
-                      <><Loader2 className="w-4 h-4 animate-spin" /><span>Generating Question…</span></>
-                    ) : (
-                      <><span>{isLastQuestion ? 'View Results' : 'Next Question'}</span><ArrowRight className="w-4 h-4" /></>
-                    )}
-                  </button>
-                </div>
-              </section>
-            )}
+                <span>End Interview & View Report</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           {/* ── Right: Webcam + Monitoring Panels ── */}
