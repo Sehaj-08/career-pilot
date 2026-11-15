@@ -20,6 +20,21 @@ logger = logging.getLogger("voice_interview")
 router = APIRouter()
 
 
+def detect_audio_format(data: bytes) -> tuple[str, str]:
+    """Detects audio container/codec from magic bytes."""
+    if data.startswith(b"RIFF"):
+        return "candidate_response.wav", "audio/wav"
+    if data.startswith(b"\x1a\x45\xdf\xa3"):
+        return "candidate_response.webm", "audio/webm"
+    if data.startswith(b"ID3") or (len(data) > 2 and data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")):
+        return "candidate_response.mp3", "audio/mpeg"
+    if data.startswith(b"OggS"):
+        return "candidate_response.ogg", "audio/ogg"
+    if data.startswith(b"fLaC"):
+        return "candidate_response.flac", "audio/flac"
+    return "candidate_response.wav", "audio/wav"
+
+
 @router.websocket("/ws/{session_id}")
 @router.websocket("/api/ws/interview/{session_id}")
 async def voice_interview_websocket(websocket: WebSocket, session_id: str):
@@ -156,6 +171,48 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         finally:
             current_turn_task = None
 
+    async def process_turn_audio(audio_data: bytes, fallback_text: str = ""):
+        """Processes candidate voice turn: transcribes via ElevenLabs STT with fallback."""
+        nonlocal current_turn_task
+        await send_json({"type": "status", "status": "transcribing"})
+
+        transcribed_text = ""
+        if audio_data and len(audio_data) > 400:
+            fname, ctype = detect_audio_format(audio_data)
+            logger.info(f"Submitting {len(audio_data)} bytes to ElevenLabs STT (format: {ctype}, name: {fname})")
+            try:
+                transcribed_text = await transcribe_audio(
+                    audio_data,
+                    filename=fname,
+                    content_type=ctype
+                )
+                logger.info(f"ElevenLabs STT transcription: '{transcribed_text}'")
+            except Exception as stt_err:
+                logger.error(f"ElevenLabs STT error: {stt_err}")
+                transcribed_text = ""
+
+        # Use fallback transcript if ElevenLabs was silent or errored
+        candidate_speech = transcribed_text.strip()
+        if not candidate_speech and fallback_text.strip():
+            logger.info(f"Using client real-time speech fallback: '{fallback_text}'")
+            candidate_speech = fallback_text.strip()
+
+        if candidate_speech:
+            await send_json({
+                "type": "candidate_transcript",
+                "text": candidate_speech
+            })
+            current_turn_task = asyncio.create_task(
+                handle_candidate_turn(candidate_speech)
+            )
+        else:
+            logger.warning("No speech detected from STT or fallback")
+            await send_json({
+                "type": "candidate_transcript",
+                "text": "(Silence or unclear speech)"
+            })
+            await send_json({"type": "status", "status": "listening"})
+
     try:
         while True:
             message = await websocket.receive()
@@ -199,8 +256,9 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                         "question_title": session.current_question_title,
                     })
 
-                    # If first turn, speak the question displayed on top
-                    if session.turn_count == 0:
+                    # If first turn, speak the question displayed on top (only once per session)
+                    if session.turn_count == 0 and not getattr(session, "has_spoken_opening", False):
+                        session.has_spoken_opening = True
                         current_turn_task = asyncio.create_task(handle_opening_question())
 
                 # 2. Base64 Audio Chunk from Mic
@@ -209,43 +267,22 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                     if b64_chunk:
                         candidate_audio_buffer.extend(base64.b64decode(b64_chunk))
 
-                # 3. Candidate Finished Speaking (Turn Complete)
+                # 3. Complete Candidate Audio Turn (Self-contained WAV/WebM with valid headers)
+                elif msg_type == "candidate_audio_turn":
+                    b64_audio = data.get("audio", "")
+                    fallback_text = data.get("fallback_text", "")
+                    audio_bytes = base64.b64decode(b64_audio) if b64_audio else bytes(candidate_audio_buffer)
+                    candidate_audio_buffer.clear()
+                    await process_turn_audio(audio_bytes, fallback_text=fallback_text)
+
+                # 4. Candidate Finished Speaking (Turn Complete with optional fallback)
                 elif msg_type == "finish_speaking":
-                    if len(candidate_audio_buffer) > 500:
-                        await send_json({"type": "status", "status": "transcribing"})
-                        audio_to_transcribe = bytes(candidate_audio_buffer)
-                        candidate_audio_buffer.clear()
+                    fallback_text = data.get("fallback_text", "")
+                    audio_bytes = bytes(candidate_audio_buffer)
+                    candidate_audio_buffer.clear()
+                    await process_turn_audio(audio_bytes, fallback_text=fallback_text)
 
-                        try:
-                            # ElevenLabs Scribe STT
-                            transcribed_text = await transcribe_audio(
-                                audio_to_transcribe,
-                                filename="candidate_response.wav",
-                                content_type="audio/wav"
-                            )
-                        except Exception as stt_err:
-                            logger.error(f"STT error: {stt_err}")
-                            transcribed_text = ""
-
-                        if transcribed_text.strip():
-                            await send_json({
-                                "type": "candidate_transcript",
-                                "text": transcribed_text
-                            })
-                            current_turn_task = asyncio.create_task(
-                                handle_candidate_turn(transcribed_text)
-                            )
-                        else:
-                            await send_json({
-                                "type": "candidate_transcript",
-                                "text": "(Silence or unclear speech)"
-                            })
-                            await send_json({"type": "status", "status": "listening"})
-                    else:
-                        candidate_audio_buffer.clear()
-                        await send_json({"type": "status", "status": "listening"})
-
-                # 4. Direct Text Input
+                # 5. Direct Text Input
                 elif msg_type == "text_message":
                     text = data.get("text", "").strip()
                     if text:
@@ -257,7 +294,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             handle_candidate_turn(text)
                         )
 
-                # 5. Candidate Interrupted Speech (Barge-in)
+                # 6. Candidate Interrupted Speech (Barge-in)
                 elif msg_type == "interrupt":
                     if current_turn_task and not current_turn_task.done():
                         current_turn_task.cancel()
