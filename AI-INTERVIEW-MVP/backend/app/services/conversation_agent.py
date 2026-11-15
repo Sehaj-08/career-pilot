@@ -1,7 +1,7 @@
 import json
 import os
 import re
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional, Any
 import httpx
 from dotenv import load_dotenv
 
@@ -14,69 +14,61 @@ DEFAULT_OLLAMA_MODEL = "qwen3:4b-instruct-2507-q4_K_M"
 
 
 class ConversationSession:
-    """Manages multi-turn conversation state for a live candidate interview."""
+    """Manages multi-turn conversation and adaptive evaluation state."""
 
-    def __init__(self, session_id: str, role: str, candidate_name: str = "Candidate"):
+    def __init__(
+        self,
+        session_id: str,
+        role: str,
+        candidate_name: str = "Candidate",
+        initial_question_title: str = "Explain how you would design a zero-downtime CI/CD deployment pipeline using Kubernetes and Canary or Blue-Green strategies.",
+        initial_difficulty: str = "Medium",
+    ):
         self.session_id = session_id
         self.role = role
         self.candidate_name = candidate_name
+        self.current_question_number = 1
+        self.total_questions = 5
+        self.current_question_title = initial_question_title
+        self.current_difficulty = initial_difficulty
+        self.last_feedback = ""
         self.turn_count = 0
-        self.current_difficulty = "Medium"
-        self.messages: List[Dict[str, str]] = [
-            {"role": "system", "content": self._build_system_prompt()}
-        ]
+        self.messages: List[Dict[str, str]] = []
 
-    def _build_system_prompt(self) -> str:
-        return f"""You are Alex, a Principal Engineer conducting a live technical voice interview with {self.candidate_name} for the role of {self.role}.
-
-CRITICAL SPOKEN DIALOGUE RULES:
-1. Your responses will be read aloud via Text-to-Speech. Never use Markdown formatting, bullet points, asterisks, code blocks, or emojis. Write plain, natural spoken conversational English.
-2. Keep each turn short and conversational: 2 to 4 sentences maximum. Never deliver long lectures or monologues.
-3. Always acknowledge the candidate's last answer naturally before moving to your question or follow-up.
-4. Adapt the difficulty dynamically based on the candidate's technical depth:
-   - High Depth: If the candidate gives a strong, accurate answer, immediately escalate to harder topics like system failure modes, scale bottlenecks, consistency trade-offs, and edge cases.
-   - Surface-level Depth: If the answer is basic or generic, probe for concrete technical mechanisms and implementation details.
-   - Low Depth / Incorrect: If the candidate struggles or makes mistakes, acknowledge gracefully, provide a gentle hint, and pivot to a foundational concept.
-5. Guide the conversation through core {self.role} competencies smoothly without jumping abruptly between unrelated subjects.
-"""
-
-    def add_candidate_message(self, text: str) -> None:
-        self.messages.append({"role": "user", "content": text.strip()})
+    def record_turn(self, candidate_answer: str, feedback: str, next_question: str) -> None:
+        self.messages.append({
+            "role": "user",
+            "content": f"[Question {self.current_question_number}: {self.current_question_title}] Answer: {candidate_answer}"
+        })
+        self.messages.append({
+            "role": "assistant",
+            "content": f"Feedback: {feedback} | Next Question: {next_question}"
+        })
         self.turn_count += 1
 
-    def add_assistant_message(self, text: str) -> None:
-        self.messages.append({"role": "assistant", "content": text.strip()})
 
-
-# In-memory session store (active voice interview sessions)
+# In-memory session store
 _active_sessions: Dict[str, ConversationSession] = {}
 
 
-def get_or_create_session(session_id: str, role: str = "DevOps Engineer", candidate_name: str = "Candidate") -> ConversationSession:
+def get_or_create_session(
+    session_id: str,
+    role: str = "DevOps Engineer",
+    candidate_name: str = "Candidate",
+    initial_question_title: Optional[str] = None,
+    initial_difficulty: str = "Medium",
+) -> ConversationSession:
     """Retrieve or initialize an in-memory interview session."""
     if session_id not in _active_sessions:
-        _active_sessions[session_id] = ConversationSession(session_id, role, candidate_name)
+        default_q = initial_question_title or "Explain how you would design a zero-downtime CI/CD deployment pipeline using Kubernetes and Canary or Blue-Green strategies."
+        _active_sessions[session_id] = ConversationSession(
+            session_id,
+            role,
+            candidate_name,
+            initial_question_title=default_q,
+            initial_difficulty=initial_difficulty,
+        )
     return _active_sessions[session_id]
-
-
-def extract_sentences(buffer: str) -> tuple[list[str], str]:
-    """
-    Extracts complete sentences from a streaming text buffer.
-    Returns (list_of_completed_sentences, remaining_uncompleted_buffer).
-    """
-    sentences = []
-    while True:
-        match = re.search(r'([A-Za-z0-9\)\]"][.?!])(\s+|\n+)', buffer)
-        if not match:
-            break
-        end_idx = match.end()
-        candidate = buffer[:end_idx].strip()
-        # Avoid splitting on common abbreviations
-        if candidate.lower().endswith(("e.g.", "i.e.", "vs.", "etc.", "mr.", "dr.")):
-            break
-        sentences.append(candidate)
-        buffer = buffer[end_idx:]
-    return sentences, buffer
 
 
 def _clean_spoken_text(text: str) -> str:
@@ -86,76 +78,83 @@ def _clean_spoken_text(text: str) -> str:
     return cleaned
 
 
-async def stream_conversation_turn(
+async def evaluate_and_generate_next(
     session: ConversationSession,
-    candidate_utterance: str,
+    candidate_answer: str,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
-) -> AsyncGenerator[str, None]:
+) -> Dict[str, Any]:
     """
-    Streams conversational response sentences from Ollama.
-    Emits completed sentences one by one as they are generated.
+    Evaluates candidate's spoken response, provides concise spoken feedback,
+    and adaptively generates the next technical question matching the candidate's level.
     """
-    session.add_candidate_message(candidate_utterance)
-
     ollama_url = (base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)).rstrip("/")
     ollama_model = model or os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
 
+    prompt = f"""You are Alex, a Principal Engineer conducting a live technical interview for {session.role}.
+
+Candidate was asked Question {session.current_question_number} of {session.total_questions}:
+"{session.current_question_title}"
+
+Candidate Spoken Answer:
+"{candidate_answer}"
+
+TASKS:
+1. "spoken_feedback": Provide 1 to 2 concise spoken sentences directly addressing the candidate ('You explained... however...'). Point out what was technically accurate and what key mechanism was missing or wrong. DO NOT use markdown, bullet points, asterisks, or quotes.
+2. "score": Technical score from 0 to 10 (0-4: poor/incomplete, 5-7: competent, 8-10: exceptional/deep).
+3. "next_difficulty":
+   - If score >= 8: "Hard" (test architecture, failure modes, scale, consistency)
+   - If score between 5 and 7: "Medium" (practical implementation and tools)
+   - If score < 5: "Easy" (foundational building blocks and recovery)
+4. "next_question_title": The next technical interview question (Question {session.current_question_number + 1} of {session.total_questions}) for {session.role} at the determined difficulty level. Make it build logically on the conversation. Provide ONLY the question sentence.
+
+RESPOND ONLY IN VALID JSON matching this schema:
+{{
+  "spoken_feedback": "string",
+  "score": 7,
+  "next_difficulty": "Easy" | "Medium" | "Hard",
+  "next_question_title": "string"
+}}
+"""
+
     payload = {
         "model": ollama_model,
-        "messages": session.messages,
-        "stream": True,
+        "prompt": prompt,
+        "format": "json",
+        "stream": False,
         "options": {
-            "temperature": 0.4,
+            "temperature": 0.3,
             "top_p": 0.9,
         }
     }
 
-    buffer = ""
-    full_response = []
-
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            async with client.stream("POST", f"{ollama_url}/api/chat", json=payload) as response:
-                if response.status_code != 200:
-                    error_msg = f"Ollama error: status code {response.status_code}"
-                    yield error_msg
-                    return
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post(f"{ollama_url}/api/generate", json=payload)
+            if response.status_code == 200:
+                raw_json = response.json().get("response", "{}")
+                data = json.loads(raw_json)
 
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            buffer += token
-                            full_response.append(token)
+                feedback = _clean_spoken_text(data.get("spoken_feedback", "Thank you for that explanation."))
+                score = int(data.get("score", 6))
+                next_diff = data.get("next_difficulty", "Medium")
+                if next_diff not in ("Easy", "Medium", "Hard"):
+                    next_diff = "Medium"
+                next_q = _clean_spoken_text(data.get("next_question_title", f"Could you explain how monitoring and alerts work in {session.role}?"))
 
-                        # Extract complete sentences as tokens stream in
-                        sentences, buffer = extract_sentences(buffer)
-                        for sentence in sentences:
-                            clean_sentence = _clean_spoken_text(sentence)
-                            if clean_sentence:
-                                yield clean_sentence
+                return {
+                    "spoken_feedback": feedback,
+                    "score": score,
+                    "next_difficulty": next_diff,
+                    "next_question_title": next_q,
+                }
+    except Exception as exc:
+        print(f"[conversation_agent] Evaluation error: {exc}")
 
-                        if chunk.get("done", False):
-                            break
-                    except json.JSONDecodeError:
-                        continue
-
-        # Flush any remaining text in the buffer
-        if buffer.strip():
-            clean_tail = _clean_spoken_text(buffer.strip())
-            if clean_tail:
-                yield clean_tail
-
-        # Record full assistant reply in conversation history
-        complete_reply = "".join(full_response).strip()
-        if complete_reply:
-            session.add_assistant_message(complete_reply)
-
-    except httpx.RequestError as exc:
-        fallback = "Excuse me, I had a momentary connection glitch. Could you please repeat that?"
-        yield fallback
-        session.add_assistant_message(fallback)
+    # Fallback response
+    return {
+        "spoken_feedback": "You covered the main concepts well, though there are a few edge cases to consider.",
+        "score": 6,
+        "next_difficulty": "Medium",
+        "next_question_title": f"How do you handle monitoring, alerts, and incident response in your {session.role} workflows?",
+    }

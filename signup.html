@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Create Account</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: rgba(3, 7, 18, 1);
+      font-family: Arial, sans-serif;
+    }
+
+    .form-container {
+      width: 100%;
+      max-width: 380px;
+      padding: 2rem;
+      border-radius: 0.75rem;
+      background-color: rgba(17, 24, 39, 1);
+      color: rgba(243, 244, 246, 1);
+      box-shadow: 0 20px 45px rgba(0, 0, 0, 0.35);
+    }
+
+    .title {
+      margin: 0;
+      text-align: center;
+      font-size: 1.5rem;
+      line-height: 2rem;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      margin: 0.5rem 0 0;
+      text-align: center;
+      color: rgba(156, 163, 175, 1);
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+
+    .form {
+      margin-top: 1.5rem;
+    }
+
+    .input-group {
+      margin-top: 1rem;
+      font-size: 0.875rem;
+      line-height: 1.25rem;
+    }
+
+    .input-group:first-child {
+      margin-top: 0;
+    }
+
+    .input-group label {
+      display: block;
+      margin-bottom: 0.375rem;
+      color: rgba(209, 213, 219, 1);
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border: 1px solid rgba(55, 65, 81, 1);
+      border-radius: 0.375rem;
+      outline: none;
+      background-color: rgba(17, 24, 39, 1);
+      color: rgba(243, 244, 246, 1);
+      font: inherit;
+    }
+
+    .input-group input::placeholder {
+      color: rgba(107, 114, 128, 1);
+    }
+
+    .input-group input:focus {
+      border-color: rgba(167, 139, 250, 1);
+      box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.15);
+    }
+
+    .terms {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      margin: 1rem 0;
+      color: rgba(156, 163, 175, 1);
+      font-size: 0.75rem;
+      line-height: 1.1rem;
+    }
+
+    .terms input {
+      margin: 0.15rem 0 0;
+      accent-color: rgba(167, 139, 250, 1);
+    }
+
+    a {
+      color: rgba(243, 244, 246, 1);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: rgba(196, 181, 253, 1);
+      text-decoration: underline;
+    }
+
+    .sign-up {
+      display: block;
+      width: 100%;
+      padding: 0.75rem;
+      border: none;
+      border-radius: 0.375rem;
+      background-color: rgba(167, 139, 250, 1);
+      color: rgba(17, 24, 39, 1);
+      text-align: center;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .sign-up:hover {
+      background-color: rgba(196, 181, 253, 1);
+      transform: translateY(-1px);
+    }
+
+    .sign-up:focus-visible {
+      outline: 3px solid rgba(196, 181, 253, 0.4);
+      outline-offset: 2px;
+    }
+
+    .login {
+      margin: 1.25rem 0 0;
+      color: rgba(156, 163, 175, 1);
+      text-align: center;
+      font-size: 0.75rem;
+      line-height: 1rem;
+    }
+
+    .form-message {
+      min-height: 1.25rem;
+      margin: 1rem 0 0;
+      color: rgba(248, 113, 113, 1);
+      text-align: center;
+      font-size: 0.8rem;
+      line-height: 1.25rem;
+    }
+
+    .form-message.success {
+      color: rgba(74, 222, 128, 1);
+    }
+
+    .form-message.info {
+      color: rgba(147, 197, 253, 1);
+    }
+
+    button:disabled {
+      cursor: wait;
+      opacity: 0.7;
+    }
+
+    @media (max-width: 420px) {
+      .form-container {
+        padding: 1.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="form-container">
+    <h1 class="title">Create an account</h1>
+    <p class="subtitle">Enter your details to get started.</p>
+
+    <form class="form" id="signup-form">
+      <div class="input-group">
+        <label for="fullname">Full name</label>
+        <input type="text" id="fullname" name="fullname" placeholder="Enter your full name" autocomplete="name" required>
+      </div>
+
+      <div class="input-group">
+        <label for="email">Email address</label>
+        <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+      </div>
+
+      <div class="input-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" placeholder="At least 8 characters" autocomplete="new-password" minlength="8" required>
+      </div>
+
+      <div class="input-group">
+        <label for="confirm-password">Confirm password</label>
+        <input type="password" id="confirm-password" name="confirm-password" placeholder="Enter your password again" autocomplete="new-password" minlength="8" required>
+      </div>
+
+      <label class="terms">
+        
+        <span><a href="#"></a>.</span>
+      </label>
+
+      <button type="submit" class="sign-up">Create account</button>
+    </form>
+    <p class="form-message" id="signup-message" aria-live="polite"></p>
+
+    <p class="login">Already have an account? <a href="index.html">Sign in</a></p>
+  </main>
+  <script src="auth.js"></script>
+</body>
+</html>

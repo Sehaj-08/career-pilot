@@ -8,7 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.services.conversation_agent import (
     get_or_create_session,
-    stream_conversation_turn,
+    evaluate_and_generate_next,
     ConversationSession,
 )
 from app.services.elevenlabs_service import (
@@ -24,9 +24,9 @@ router = APIRouter()
 @router.websocket("/api/ws/interview/{session_id}")
 async def voice_interview_websocket(websocket: WebSocket, session_id: str):
     """
-    Full-duplex WebSocket endpoint for live conversational voice interviews.
-    Handles microphone audio ingestion, STT, Ollama conversational reasoning,
-    and ElevenLabs streaming TTS playback.
+    Full-duplex WebSocket endpoint for coordinated voice interviews.
+    Synchronizes screen questions, candidate speech, AI evaluation,
+    spoken feedback, and adaptive next questions.
     """
     await websocket.accept()
 
@@ -40,57 +40,119 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         except Exception:
             pass
 
-    async def speak_sentences(sentence_generator):
-        """Streams sentences from conversation agent through ElevenLabs TTS to frontend."""
+    async def stream_audio_phrase(text_to_speak: str, phase: str = "question"):
+        """Streams a single phrase/sentence via ElevenLabs TTS to the browser."""
+        clean_text = text_to_speak.strip()
+        if not clean_text:
+            return
+
+        await send_json({
+            "type": "interviewer_speech_start",
+            "phase": phase,
+            "sentence": clean_text
+        })
+
+        async for chunk in stream_text_to_speech(clean_text):
+            b64_audio = base64.b64encode(chunk).decode("ascii")
+            await send_json({
+                "type": "audio_chunk",
+                "phase": phase,
+                "audio": b64_audio
+            })
+
+        await send_json({
+            "type": "interviewer_speech_end",
+            "phase": phase
+        })
+
+    async def handle_opening_question():
+        """Speaks the initial question displayed on top to start the interview."""
+        if not session:
+            return
         try:
             await send_json({"type": "status", "status": "speaking"})
-
-            async for sentence in sentence_generator:
-                clean = sentence.strip()
-                if not clean:
-                    continue
-
-                await send_json({
-                    "type": "interviewer_speech_start",
-                    "sentence": clean
-                })
-
-                # Stream audio chunks for this sentence from ElevenLabs
-                async for chunk in stream_text_to_speech(clean):
-                    b64_audio = base64.b64encode(chunk).decode("ascii")
-                    await send_json({
-                        "type": "audio_chunk",
-                        "audio": b64_audio
-                    })
-
-            await send_json({"type": "interviewer_speech_end"})
+            intro = f"Welcome to your {session.role} interview. Here is question one: {session.current_question_title}"
+            await stream_audio_phrase(intro, phase="question")
             await send_json({"type": "status", "status": "listening"})
         except asyncio.CancelledError:
-            logger.info("Speech generation cancelled by barge-in")
-            await send_json({"type": "interviewer_speech_end", "cancelled": True})
-            await send_json({"type": "status", "status": "listening"})
-            raise
-        except Exception as exc:
-            logger.error(f"Error during speech synthesis: {exc}")
-            await send_json({"type": "error", "message": str(exc)})
+            pass
+        except Exception as err:
+            logger.error(f"Error speaking opening question: {err}")
             await send_json({"type": "status", "status": "listening"})
 
-    async def handle_candidate_turn(transcript: str):
-        """Processes candidate's transcribed answer with Ollama and ElevenLabs."""
+    async def handle_candidate_turn(candidate_transcript: str):
+        """
+        Executes the user's required loop:
+        1. Evaluate candidate answer with Ollama.
+        2. ElevenLabs speaks feedback first.
+        3. Send new question to frontend to update top card on screen.
+        4. ElevenLabs speaks only the next question.
+        5. Switch back to listening.
+        """
         nonlocal current_turn_task
-        if not session or not transcript.strip():
+        if not session or not candidate_transcript.strip():
             await send_json({"type": "status", "status": "listening"})
             return
 
-        await send_json({"type": "status", "status": "thinking"})
-
-        # Stream turn using Ollama conversation agent
-        generator = stream_conversation_turn(session, transcript)
-        current_turn_task = asyncio.create_task(speak_sentences(generator))
         try:
-            await current_turn_task
+            await send_json({"type": "status", "status": "thinking"})
+
+            # 1. Ollama evaluates answer & generates next adaptive question
+            eval_result = await evaluate_and_generate_next(session, candidate_transcript)
+            spoken_feedback = eval_result["spoken_feedback"]
+            score = eval_result["score"]
+            next_diff = eval_result["next_difficulty"]
+            next_q_title = eval_result["next_question_title"]
+
+            await send_json({"type": "status", "status": "speaking"})
+
+            # 2. ElevenLabs speaks what Ollama said about the answer (FEEDBACK FIRST)
+            await stream_audio_phrase(spoken_feedback, phase="feedback")
+
+            # Brief natural pause between feedback and next question
+            await asyncio.sleep(0.4)
+
+            # 3. Check if all questions completed
+            if session.current_question_number >= session.total_questions:
+                wrapup = (
+                    "Thank you. You have completed all technical questions for this interview. "
+                    "You can now review your final evaluation summary."
+                )
+                await stream_audio_phrase(wrapup, phase="completed")
+                await send_json({"type": "interview_completed", "score": score})
+                await send_json({"type": "status", "status": "completed"})
+                return
+
+            # Update session state for next question
+            session.current_question_number += 1
+            session.current_question_title = next_q_title
+            session.current_difficulty = next_diff
+            session.record_turn(candidate_transcript, spoken_feedback, next_q_title)
+
+            # 4. Update the TOP CARD ON SCREEN
+            await send_json({
+                "type": "new_question",
+                "question_number": session.current_question_number,
+                "total_questions": session.total_questions,
+                "title": session.current_question_title,
+                "difficulty": session.current_difficulty,
+                "score": score,
+                "feedback": spoken_feedback
+            })
+
+            # 5. ElevenLabs speaks ONLY the NEXT QUESTION
+            await stream_audio_phrase(session.current_question_title, phase="question")
+
+            # 6. Return to listening for candidate's next answer
+            await send_json({"type": "status", "status": "listening"})
+
         except asyncio.CancelledError:
-            pass
+            logger.info("Turn processing cancelled by candidate interrupt")
+            await send_json({"type": "status", "status": "listening"})
+        except Exception as exc:
+            logger.error(f"Error handling candidate turn: {exc}")
+            await send_json({"type": "error", "message": str(exc)})
+            await send_json({"type": "status", "status": "listening"})
         finally:
             current_turn_task = None
 
@@ -98,12 +160,12 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
         while True:
             message = await websocket.receive()
 
-            # Handle binary audio frame from browser mic
+            # Binary audio frame from mic
             if "bytes" in message and message["bytes"]:
                 candidate_audio_buffer.extend(message["bytes"])
                 continue
 
-            # Handle text/JSON control messages
+            # Control message
             if "text" in message and message["text"]:
                 try:
                     data = json.loads(message["text"])
@@ -112,30 +174,36 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
 
                 msg_type = data.get("type")
 
-                # 1. Initialize Interview Session
+                # 1. Initialize Interview Session (Synced with top question)
                 if msg_type == "init_session":
                     role = data.get("role", "DevOps Engineer")
                     name = data.get("candidate_name", "Candidate")
-                    session = get_or_create_session(session_id, role=role, candidate_name=name)
+                    initial_q = data.get("initial_question") or {}
+                    initial_title = initial_q.get("title") if isinstance(initial_q, dict) else str(initial_q)
+                    initial_diff = initial_q.get("difficulty", "Medium") if isinstance(initial_q, dict) else "Medium"
+
+                    session = get_or_create_session(
+                        session_id,
+                        role=role,
+                        candidate_name=name,
+                        initial_question_title=initial_title,
+                        initial_difficulty=initial_diff,
+                    )
 
                     await send_json({
                         "type": "session_ready",
                         "session_id": session_id,
                         "role": role,
                         "candidate_name": name,
+                        "question_number": session.current_question_number,
+                        "question_title": session.current_question_title,
                     })
 
-                    # If this is the start of the interview, have AI ask the opening question
+                    # If first turn, speak the question displayed on top
                     if session.turn_count == 0:
-                        opening_prompt = (
-                            f"Hello! I am ready for my {role} interview. Please introduce yourself briefly "
-                            "and ask your first question."
-                        )
-                        current_turn_task = asyncio.create_task(
-                            handle_candidate_turn(opening_prompt)
-                        )
+                        current_turn_task = asyncio.create_task(handle_opening_question())
 
-                # 2. Base64 Audio Chunk from Browser Mic
+                # 2. Base64 Audio Chunk from Mic
                 elif msg_type == "audio_chunk":
                     b64_chunk = data.get("data", "")
                     if b64_chunk:
@@ -149,7 +217,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                         candidate_audio_buffer.clear()
 
                         try:
-                            # Use ElevenLabs Scribe STT
+                            # ElevenLabs Scribe STT
                             transcribed_text = await transcribe_audio(
                                 audio_to_transcribe,
                                 filename="candidate_response.wav",
@@ -164,7 +232,9 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                                 "type": "candidate_transcript",
                                 "text": transcribed_text
                             })
-                            await handle_candidate_turn(transcribed_text)
+                            current_turn_task = asyncio.create_task(
+                                handle_candidate_turn(transcribed_text)
+                            )
                         else:
                             await send_json({
                                 "type": "candidate_transcript",
@@ -175,7 +245,7 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                         candidate_audio_buffer.clear()
                         await send_json({"type": "status", "status": "listening"})
 
-                # 4. Direct Text Input (Fallback / Direct STT)
+                # 4. Direct Text Input
                 elif msg_type == "text_message":
                     text = data.get("text", "").strip()
                     if text:
@@ -183,9 +253,11 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                             "type": "candidate_transcript",
                             "text": text
                         })
-                        await handle_candidate_turn(text)
+                        current_turn_task = asyncio.create_task(
+                            handle_candidate_turn(text)
+                        )
 
-                # 5. Candidate Interrupted AI Speech (Barge-in)
+                # 5. Candidate Interrupted Speech (Barge-in)
                 elif msg_type == "interrupt":
                     if current_turn_task and not current_turn_task.done():
                         current_turn_task.cancel()

@@ -5,8 +5,12 @@ export default function VoiceTranscript({
   currentInterviewerSentence = '',
   candidateTranscript = '',
   conversationHistory = [],
+  speechPhase = 'question',
 }) {
   const [showHistory, setShowHistory] = useState(false);
+
+  const isFeedback = speechPhase === 'feedback';
+  const labelText = isFeedback ? 'Interviewer Feedback' : 'Active Question';
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-4">
@@ -55,13 +59,21 @@ export default function VoiceTranscript({
 
       {/* Latest Interviewer Spoken Question / Sentence */}
       {currentInterviewerSentence && (
-        <div className="flex items-start gap-3 p-3.5 rounded-xl bg-indigo-500/5 border border-indigo-500/20">
-          <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-400 flex-shrink-0 mt-0.5">
+        <div className={`flex items-start gap-3 p-3.5 rounded-xl border ${
+          isFeedback
+            ? 'bg-amber-500/10 border-amber-500/30'
+            : 'bg-indigo-500/5 border-indigo-500/20'
+        }`}>
+          <div className={`p-2 rounded-lg flex-shrink-0 mt-0.5 ${
+            isFeedback ? 'bg-amber-500/20 text-amber-400' : 'bg-indigo-500/20 text-indigo-400'
+          }`}>
             <Bot className="w-4 h-4" />
           </div>
           <div className="space-y-1">
-            <div className="text-[11px] font-bold text-indigo-400 uppercase tracking-wider">
-              Alexa (Interviewer)
+            <div className={`text-[11px] font-bold uppercase tracking-wider ${
+              isFeedback ? 'text-amber-400' : 'text-indigo-400'
+            }`}>
+              {labelText}
             </div>
             <p className="text-sm text-slate-100 font-medium leading-relaxed">
               {currentInterviewerSentence}

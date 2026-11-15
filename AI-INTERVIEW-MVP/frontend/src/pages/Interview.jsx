@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Clock,
@@ -61,7 +61,22 @@ export default function Interview() {
   const interviewId    = localStorage.getItem('interview_session_id') || `sess_${Date.now()}`;
 
   // Current question shown to the candidate (public shape: { id, title, difficulty? })
-  const [currentQuestion, setCurrentQuestion]   = useState(null);
+  const [currentQuestion, setCurrentQuestion] = useState(() => {
+    try {
+      const cached = localStorage.getItem('interview_questions');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return { ...parsed[0], difficulty: 'Medium' };
+        }
+      }
+    } catch (e) {}
+    return {
+      id: 'q_default',
+      title: 'Explain how you would design a zero-downtime CI/CD deployment pipeline using Kubernetes and Canary or Blue-Green strategies.',
+      difficulty: 'Medium'
+    };
+  });
   const [currentIndex, setCurrentIndex]         = useState(0);
   const [answer, setAnswer]                     = useState('');
   const [evaluation, setEvaluation]             = useState(null);
@@ -109,6 +124,17 @@ export default function Interview() {
 
   const { videoRef, isCameraActive, error, faceCount, stopWebcam } = useWebcam(handleCameraViolation);
 
+  const handleNewQuestion = useCallback((qData) => {
+    if (!qData) return;
+    setCurrentQuestion({
+      id: `q_${qData.question_number}`,
+      title: qData.title,
+      difficulty: qData.difficulty || 'Medium',
+    });
+    setCurrentIndex(qData.question_number - 1);
+    localStorage.setItem('current_question_index', (qData.question_number - 1).toString());
+  }, []);
+
   // Live ElevenLabs Voice Interview hook
   const {
     status: voiceStatus,
@@ -117,6 +143,7 @@ export default function Interview() {
     audioVolume,
     candidateTranscript,
     currentInterviewerSentence,
+    speechPhase,
     conversationHistory,
     toggleMute,
     finishSpeaking,
@@ -125,6 +152,9 @@ export default function Interview() {
     sessionId: interviewId,
     role: candidateRole,
     candidateName,
+    initialQuestion: currentQuestion,
+    onNewQuestion: handleNewQuestion,
+    enabled: hasStarted,
   });
 
   // Sync webcam face metrics with monitoring hook
@@ -486,68 +516,6 @@ export default function Interview() {
     );
   }
 
-  // ── Pre-Interview Fullscreen Gate Modal ────────────────────────────────────
-  if (!hasStarted) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center p-4">
-        <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 flex-shrink-0">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div>
-              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                Security & Proctoring Verification
-              </h2>
-              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
-                Technical Assessment – {candidateRole}
-              </p>
-            </div>
-          </div>
-
-          <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 space-y-3 text-xs sm:text-sm text-slate-300">
-            <div className="font-semibold text-slate-200 flex items-center gap-2">
-              <Lock className="w-4 h-4 text-indigo-400" />
-              <span>Assessment Protocol & Rules:</span>
-            </div>
-            <ul className="space-y-2 text-slate-400">
-              <li className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span><strong className="text-slate-200">Fullscreen Required:</strong> The interview runs exclusively in fullscreen mode to ensure fairness.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span><strong className="text-slate-200">Restricted Clipboard:</strong> Copying, cutting, and pasting are disabled inside the interface.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span><strong className="text-slate-200">Tab & Focus Monitoring:</strong> Switching tabs or windows will be logged as suspicious activity.</span>
-              </li>
-              <li className="flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
-                <span><strong className="text-slate-200">Webcam Proctoring:</strong> Face presence tracking will be active throughout your 30-minute session.</span>
-              </li>
-            </ul>
-          </div>
-
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={handleStartFullscreen}
-              className="w-full py-4 px-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-2xl text-base shadow-xl shadow-indigo-600/25 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"
-            >
-              <Maximize2 className="w-5 h-5" />
-              <span>Start Fullscreen Interview</span>
-            </button>
-            <p className="text-[11px] text-slate-500 text-center mt-3">
-              Clicking will request fullscreen mode and immediately initiate proctoring.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const diffStyle = DIFFICULTY_STYLES[currentQuestion.difficulty] || DIFFICULTY_STYLES.Medium;
 
   return (
@@ -556,8 +524,68 @@ export default function Interview() {
       onPaste={handlePaste}
       onCut={handleCut}
       onContextMenu={handleContextMenu}
-      className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 select-text"
+      className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 select-text relative"
     >
+      {/* ── Pre-Interview Fullscreen Gate Modal (Overlay) ── */}
+      {!hasStarted && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 flex-shrink-0">
+                <Shield className="w-6 h-6" />
+              </div>
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                  Security & Proctoring Verification
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                  Technical Assessment – {candidateRole}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 space-y-3 text-xs sm:text-sm text-slate-300">
+              <div className="font-semibold text-slate-200 flex items-center gap-2">
+                <Lock className="w-4 h-4 text-indigo-400" />
+                <span>Assessment Protocol & Rules:</span>
+              </div>
+              <ul className="space-y-2 text-slate-400">
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <span><strong className="text-slate-200">Fullscreen Required:</strong> The interview runs exclusively in fullscreen mode to ensure fairness.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <span><strong className="text-slate-200">Restricted Clipboard:</strong> Copying, cutting, and pasting are disabled inside the interface.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <span><strong className="text-slate-200">Tab & Focus Monitoring:</strong> Switching tabs or windows will be logged as suspicious activity.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                  <span><strong className="text-slate-200">Webcam Proctoring:</strong> Face presence tracking will be active throughout your 30-minute session.</span>
+                </li>
+              </ul>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleStartFullscreen}
+                className="w-full py-4 px-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-2xl text-base shadow-xl shadow-indigo-600/25 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"
+              >
+                <Maximize2 className="w-5 h-5" />
+                <span>Start Fullscreen Interview</span>
+              </button>
+              <p className="text-[11px] text-slate-500 text-center mt-3">
+                Clicking will request fullscreen mode and immediately initiate proctoring.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto space-y-6">
 
         {/* ── Top Warning Banner (Hour 6) ── */}
@@ -679,6 +707,7 @@ export default function Interview() {
               currentInterviewerSentence={currentInterviewerSentence}
               candidateTranscript={candidateTranscript}
               conversationHistory={conversationHistory}
+              speechPhase={speechPhase}
             />
 
             <VoiceControls

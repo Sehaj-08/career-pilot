@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-export function useVoiceInterview({ sessionId, role, candidateName }) {
+export function useVoiceInterview({ sessionId, role, candidateName, initialQuestion, onNewQuestion, enabled = true }) {
   const [status, setStatus] = useState('connecting'); // connecting, listening, transcribing, thinking, speaking, interrupted
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [audioVolume, setAudioVolume] = useState(0); // 0-100 for visualizer
   const [candidateTranscript, setCandidateTranscript] = useState('');
   const [currentInterviewerSentence, setCurrentInterviewerSentence] = useState('');
+  const [speechPhase, setSpeechPhase] = useState('question'); // 'question' | 'feedback' | 'completed'
   const [conversationHistory, setConversationHistory] = useState([]);
 
   const wsRef = useRef(null);
@@ -20,6 +21,10 @@ export function useVoiceInterview({ sessionId, role, candidateName }) {
   const isPlayingRef = useRef(false);
   const silenceTimerRef = useRef(null);
   const hasSpokenRef = useRef(false);
+  const onNewQuestionRef = useRef(onNewQuestion);
+  onNewQuestionRef.current = onNewQuestion;
+  const initialQuestionRef = useRef(initialQuestion);
+  initialQuestionRef.current = initialQuestion;
 
   // ── Helper: Play next audio buffer in queue ───────────────────────────────
   const playNextInQueue = useCallback(() => {
@@ -119,6 +124,7 @@ export function useVoiceInterview({ sessionId, role, candidateName }) {
 
   // ── Initialize WebSocket & MediaStream ───────────────────────────────────
   useEffect(() => {
+    if (!enabled) return;
     let mounted = true;
 
     // 1. Setup AudioContext for low-latency playback
@@ -146,6 +152,7 @@ export function useVoiceInterview({ sessionId, role, candidateName }) {
         type: 'init_session',
         role: role || 'DevOps Engineer',
         candidate_name: candidateName || 'Candidate',
+        initial_question: initialQuestionRef.current || null,
       }));
     };
 
@@ -173,12 +180,19 @@ export function useVoiceInterview({ sessionId, role, candidateName }) {
             }
             break;
 
+          case 'new_question':
+            if (onNewQuestionRef.current) {
+              onNewQuestionRef.current(msg);
+            }
+            break;
+
           case 'interviewer_speech_start':
             setCurrentInterviewerSentence(msg.sentence);
+            setSpeechPhase(msg.phase || 'question');
             currentSentenceAudioChunks = [];
             setConversationHistory((prev) => [
               ...prev,
-              { speaker: 'interviewer', text: msg.sentence, timestamp: new Date() }
+              { speaker: 'interviewer', phase: msg.phase || 'question', text: msg.sentence, timestamp: new Date() }
             ]);
             break;
 
@@ -372,7 +386,7 @@ export function useVoiceInterview({ sessionId, role, candidateName }) {
         ws.close();
       }
     };
-  }, [sessionId, role, candidateName, playNextInQueue, stopAudioPlayback, finishSpeaking]);
+  }, [sessionId, role, candidateName, enabled, playNextInQueue, stopAudioPlayback, finishSpeaking]);
 
   return {
     status,
@@ -381,6 +395,7 @@ export function useVoiceInterview({ sessionId, role, candidateName }) {
     audioVolume,
     candidateTranscript,
     currentInterviewerSentence,
+    speechPhase,
     conversationHistory,
     toggleMute,
     finishSpeaking,
