@@ -91,7 +91,9 @@ async def evaluate_and_generate_next(
     ollama_url = (base_url or os.getenv("OLLAMA_BASE_URL", DEFAULT_OLLAMA_BASE_URL)).rstrip("/")
     ollama_model = model or os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
 
-    prompt = f"""You are Alex, a Principal Engineer conducting a live technical interview for {session.role}.
+    prompt = f"""You are Alex, a Principal Staff Engineer conducting a rigorous technical interview for a {session.role} position.
+
+You must objectively evaluate the candidate's answer for technical accuracy, core principles, and depth.
 
 Candidate was asked Question {session.current_question_number} of {session.total_questions}:
 "{session.current_question_title}"
@@ -99,9 +101,18 @@ Candidate was asked Question {session.current_question_number} of {session.total
 Candidate Spoken Answer:
 "{candidate_answer}"
 
+STRICT SCORING RUBRIC (Integer from 0 to 10):
+- 0 to 2 (Completely Incorrect / Irrelevant): Answer is factually wrong, unrelated to the question, gibberish, or clearly guessing.
+- 3 to 4 (Poor / Incomplete): Major technical misconceptions or missed the core concept entirely.
+- 5 to 6 (Satisfactory / Basic): Foundational concepts mentioned, but lacks production depth, tools, or best practices.
+- 7 to 8 (Proficient / Strong): Technically sound, accurate architecture, trade-offs, and practical mechanisms explained.
+- 9 to 10 (Exceptional / Mastery): Deep production expertise, failure modes, scale, and best practices.
+
+CRITICAL INSTRUCTION: You are a strict technical evaluator. If the candidate gives an answer that is incorrect, wrong, or off-topic, you MUST assign a score between 0 and 2. DO NOT give generous scores to incorrect answers.
+
 TASKS:
-1. "spoken_feedback": Provide 1 to 2 concise spoken sentences directly addressing the candidate ('You explained... however...'). Point out what was technically accurate and what key mechanism was missing or wrong. DO NOT use markdown, bullet points, asterisks, or quotes.
-2. "score": Technical score from 0 to 10 (0-4: poor/incomplete, 5-7: competent, 8-10: exceptional/deep).
+1. "spoken_feedback": Provide 1 to 2 concise spoken sentences directly addressing the candidate ('You mentioned... however...'). Point out what was technically accurate (if any) and what key mechanism was wrong or missing. DO NOT use markdown, bullet points, asterisks, or quotes.
+2. "score": Strict technical score (integer 0 to 10) according to the rubric above.
 3. "next_difficulty":
    - If score >= 8: "Hard" (test architecture, failure modes, scale, consistency)
    - If score between 5 and 7: "Medium" (practical implementation and tools)
@@ -111,7 +122,7 @@ TASKS:
 RESPOND ONLY IN VALID JSON matching this schema:
 {{
   "spoken_feedback": "string",
-  "score": 7,
+  "score": 0,
   "next_difficulty": "Easy" | "Medium" | "Hard",
   "next_question_title": "string"
 }}
@@ -123,7 +134,7 @@ RESPOND ONLY IN VALID JSON matching this schema:
         "format": "json",
         "stream": False,
         "options": {
-            "temperature": 0.3,
+            "temperature": 0.2,
             "top_p": 0.9,
         }
     }
@@ -135,12 +146,17 @@ RESPOND ONLY IN VALID JSON matching this schema:
                 raw_json = response.json().get("response", "{}")
                 data = json.loads(raw_json)
 
-                feedback = _clean_spoken_text(data.get("spoken_feedback", "Thank you for that explanation."))
-                score = int(data.get("score", 6))
+                feedback = _clean_spoken_text(data.get("spoken_feedback", "Thank you for your answer."))
+                raw_score = data.get("score")
+                try:
+                    score = max(0, min(10, int(raw_score))) if raw_score is not None else 0
+                except (ValueError, TypeError):
+                    score = 0
+
                 next_diff = data.get("next_difficulty", "Medium")
                 if next_diff not in ("Easy", "Medium", "Hard"):
-                    next_diff = "Medium"
-                next_q = _clean_spoken_text(data.get("next_question_title", f"Could you explain how monitoring and alerts work in {session.role}?"))
+                    next_diff = "Easy" if score < 5 else "Medium"
+                next_q = _clean_spoken_text(data.get("next_question_title", f"Could you explain how foundational concepts work in {session.role}?"))
 
                 return {
                     "spoken_feedback": feedback,
@@ -151,10 +167,10 @@ RESPOND ONLY IN VALID JSON matching this schema:
     except Exception as exc:
         print(f"[conversation_agent] Evaluation error: {exc}")
 
-    # Fallback response
+    # Fallback response for unparseable or failed evaluation (Strict 0 score)
     return {
-        "spoken_feedback": "You covered the main concepts well, though there are a few edge cases to consider.",
-        "score": 6,
-        "next_difficulty": "Medium",
-        "next_question_title": f"How do you handle monitoring, alerts, and incident response in your {session.role} workflows?",
+        "spoken_feedback": "I was unable to verify the technical concepts in that response. Let us proceed to the next question.",
+        "score": 0,
+        "next_difficulty": "Easy",
+        "next_question_title": f"Let us return to the basics. Can you explain the core concepts of {session.role}?",
     }

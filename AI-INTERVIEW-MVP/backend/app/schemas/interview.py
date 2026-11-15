@@ -96,13 +96,14 @@ VALID_JOB_ROLES = {"DevOps Engineer", "Backend Developer", "Frontend Developer"}
 
 
 class ResultSubmission(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     interview_id: str = Field(min_length=1, max_length=100)
     candidate: str = Field(min_length=1, max_length=100)
     role: str = Field(min_length=1, max_length=100)
     score: float = Field(ge=0.0, le=10.0)
     total_questions: int = Field(ge=0, le=5)
+    strong_answers: Optional[int] = Field(default=0)
     warnings: int = Field(ge=0)
     feedback: str = Field(default="", max_length=5_000)
     question_details: List[Dict[str, Any]] = Field(default_factory=list)
