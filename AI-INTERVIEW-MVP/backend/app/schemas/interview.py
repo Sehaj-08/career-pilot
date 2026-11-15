@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -90,3 +90,38 @@ class AdaptiveQuestionResponse(BaseModel):
     question_id: str
     question: str
     difficulty: str
+
+
+VALID_JOB_ROLES = {"DevOps Engineer", "Backend Developer", "Frontend Developer"}
+
+
+class ResultSubmission(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    interview_id: str = Field(min_length=1, max_length=100)
+    candidate: str = Field(min_length=1, max_length=100)
+    role: str = Field(min_length=1, max_length=100)
+    score: float = Field(ge=0.0, le=10.0)
+    total_questions: int = Field(ge=0, le=5)
+    warnings: int = Field(ge=0)
+    feedback: str = Field(default="", max_length=5_000)
+    question_details: List[Dict[str, Any]] = Field(default_factory=list)
+    monitoring_events: List[Dict[str, Any]] = Field(default_factory=list)
+    completed_at: str = Field(min_length=1, max_length=100)
+
+    @field_validator("interview_id", "candidate", "completed_at")
+    @classmethod
+    def strip_required_strings(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be empty")
+        return stripped
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        stripped = value.strip()
+        if stripped not in VALID_JOB_ROLES:
+            raise ValueError(f"role must be one of {sorted(VALID_JOB_ROLES)}")
+        return stripped
+

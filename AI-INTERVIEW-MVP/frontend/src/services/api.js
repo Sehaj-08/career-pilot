@@ -180,4 +180,32 @@ function getFallbackQuestionsByRole(role) {
   return fallbacks[role] || fallbacks['Backend Developer'];
 }
 
+/**
+ * Save final interview performance report into SQLite backend.
+ * Calls POST /api/results
+ */
+export async function saveInterviewResult(reportData) {
+  try {
+    const response = await client.post('/api/results', reportData);
+    return response.data;
+  } catch (error) {
+    console.warn('Failed to save result to backend:', error.message);
+    throw error;
+  }
+}
+
+/**
+ * Retrieve saved interview performance report from SQLite backend.
+ * Calls GET /api/results/{interviewId}
+ */
+export async function fetchInterviewResult(interviewId) {
+  try {
+    const response = await client.get(`/api/results/${encodeURIComponent(interviewId)}`);
+    return response.data;
+  } catch (error) {
+    console.warn(`Failed to fetch result for interview ${interviewId}:`, error.message);
+    throw error;
+  }
+}
+
 export default client;

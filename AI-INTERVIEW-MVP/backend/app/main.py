@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
 from app.routes import interview, evaluation, results
+from app.database.db import init_db
 
 load_dotenv()
 
@@ -12,6 +13,11 @@ app = FastAPI(
     version="0.1.0",
     description="Backend API for AI-assisted technical interviews and proctoring evaluation"
 )
+
+@app.on_event("startup")
+def on_startup():
+    """Initialize database and tables on startup."""
+    init_db()
 
 # Allow React frontend on localhost
 origins = [
@@ -49,4 +55,5 @@ def root():
 app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
 app.include_router(interview.router, prefix="/interview", tags=["Interview"])
 app.include_router(evaluation.router, prefix="/api/evaluation", tags=["Evaluation"])
+app.include_router(results.router, prefix="/api/results", tags=["Results"])
 app.include_router(results.router, prefix="/results", tags=["Results"])

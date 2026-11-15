@@ -30,9 +30,12 @@ import {
   getInterviewSessionKey,
   readInterviewAnswers,
   saveInterviewAnswer,
+  saveInterviewResult,
 } from '../services/api';
 import { useWebcam } from '../hooks/useWebcam';
 import { useMonitoring } from '../hooks/useMonitoring';
+import { getStoredEvents } from '../utils/eventLogger';
+import { buildInterviewReport } from '../utils/scoreCalculator';
 import WebcamMonitor from '../components/WebcamMonitor';
 import MonitoringPanel from '../components/MonitoringPanel';
 
@@ -195,31 +198,57 @@ export default function Interview() {
     return () => clearInterval(timerInterval);
   }, []);
 
-  const handleTimeExpired = async () => {
+  const finishAndPersistInterview = async (extraDraft = null) => {
+    if (isCompletingRef.current) return;
     isCompletingRef.current = true;
     stopMonitoring();
     await exitFullscreen();
 
+    if (extraDraft) {
+      saveInterviewAnswer(extraDraft, sessionKeyRef.current);
+    }
+
+    const answers = readInterviewAnswers();
+    const storedEvents = getStoredEvents(interviewId);
+    const reportPayload = buildInterviewReport(
+      candidateName,
+      candidateRole,
+      interviewId,
+      answers,
+      storedEvents
+    );
+
+    try {
+      await saveInterviewResult(reportPayload);
+      localStorage.setItem('interview_saved_to_db', 'true');
+    } catch (err) {
+      console.warn('Backend SQLite save failed; preserved report locally:', err);
+      localStorage.setItem('interview_saved_to_db', 'false');
+      localStorage.setItem('interview_report_pending', JSON.stringify(reportPayload));
+    }
+
+    navigate('/result');
+  };
+
+  const handleTimeExpired = async () => {
     const typedAnswer  = answerRef.current.trim();
     const activeQ      = currentQuestionRef.current;
     const activeIndex  = currentIndexRef.current;
 
+    let finalDraft = null;
     if (typedAnswer && activeQ) {
-      saveInterviewAnswer(
-        {
-          question_id:    activeQ.id,
-          question_number: activeIndex + 1,
-          question_title: activeQ.title,
-          difficulty:     activeQ.difficulty || 'Medium',
-          answer:         typedAnswer,
-          submitted_at:   new Date().toISOString(),
-          evaluation:     evaluationRef.current,
-          evaluation_status: evaluationRef.current ? 'complete' : 'draft',
-        },
-        sessionKeyRef.current,
-      );
+      finalDraft = {
+        question_id:    activeQ.id,
+        question_number: activeIndex + 1,
+        question_title: activeQ.title,
+        difficulty:     activeQ.difficulty || 'Medium',
+        answer:         typedAnswer,
+        submitted_at:   new Date().toISOString(),
+        evaluation:     evaluationRef.current,
+        evaluation_status: evaluationRef.current ? 'complete' : 'draft',
+      };
     }
-    navigate('/result');
+    await finishAndPersistInterview(finalDraft);
   };
 
   const formatTime = (totalSeconds) => {
@@ -300,11 +329,7 @@ export default function Interview() {
     if (!evaluation) return;
 
     if (isLastQuestion) {
-      // Clean completion: stop monitoring first to avoid false exit alert
-      isCompletingRef.current = true;
-      stopMonitoring();
-      await exitFullscreen();
-      navigate('/result');
+      await finishAndPersistInterview();
       return;
     }
 
