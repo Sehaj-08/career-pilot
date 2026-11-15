@@ -69,7 +69,7 @@ function blobToBase64(blob) {
   });
 }
 
-export function useVoiceInterview({ sessionId, role, candidateName, initialQuestion, onNewQuestion, enabled = true }) {
+export function useVoiceInterview({ sessionId, role, candidateName, initialQuestion, onNewQuestion, onInterviewCompleted, enabled = true }) {
   const [status, setStatus] = useState('connecting'); // connecting, listening, transcribing, thinking, speaking, interrupted, completed
   const [isConnected, setIsConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -101,6 +101,8 @@ export function useVoiceInterview({ sessionId, role, candidateName, initialQuest
 
   const onNewQuestionRef = useRef(onNewQuestion);
   onNewQuestionRef.current = onNewQuestion;
+  const onInterviewCompletedRef = useRef(onInterviewCompleted);
+  onInterviewCompletedRef.current = onInterviewCompleted;
   const initialQuestionRef = useRef(initialQuestion);
   initialQuestionRef.current = initialQuestion;
 
@@ -332,6 +334,12 @@ export function useVoiceInterview({ sessionId, role, candidateName, initialQuest
           case 'new_question':
             if (onNewQuestionRef.current) {
               onNewQuestionRef.current(msg);
+            }
+            break;
+
+          case 'interview_completed':
+            if (onInterviewCompletedRef.current) {
+              onInterviewCompletedRef.current(msg);
             }
             break;
 

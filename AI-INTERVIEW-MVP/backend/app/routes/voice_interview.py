@@ -127,22 +127,35 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
             # Brief natural pause between feedback and next question
             await asyncio.sleep(0.4)
 
+            prev_q_title = session.current_question_title
+            prev_diff = session.current_difficulty
+
             # 3. Check if all questions completed
             if session.current_question_number >= session.total_questions:
+                session.record_turn(candidate_transcript, spoken_feedback, "")
                 wrapup = (
                     "Thank you. You have completed all technical questions for this interview. "
                     "You can now review your final evaluation summary."
                 )
                 await stream_audio_phrase(wrapup, phase="completed")
-                await send_json({"type": "interview_completed", "score": score})
+                await send_json({
+                    "type": "interview_completed",
+                    "question_number": session.current_question_number,
+                    "total_questions": session.total_questions,
+                    "score": score,
+                    "feedback": spoken_feedback,
+                    "answer": candidate_transcript,
+                    "question_title": prev_q_title,
+                    "difficulty": prev_diff,
+                })
                 await send_json({"type": "status", "status": "completed"})
                 return
 
             # Update session state for next question
+            session.record_turn(candidate_transcript, spoken_feedback, next_q_title)
             session.current_question_number += 1
             session.current_question_title = next_q_title
             session.current_difficulty = next_diff
-            session.record_turn(candidate_transcript, spoken_feedback, next_q_title)
 
             # 4. Update the TOP CARD ON SCREEN
             await send_json({
@@ -152,7 +165,10 @@ async def voice_interview_websocket(websocket: WebSocket, session_id: str):
                 "title": session.current_question_title,
                 "difficulty": session.current_difficulty,
                 "score": score,
-                "feedback": spoken_feedback
+                "feedback": spoken_feedback,
+                "previous_answer": candidate_transcript,
+                "previous_question_title": prev_q_title,
+                "previous_difficulty": prev_diff,
             })
 
             # 5. ElevenLabs speaks ONLY the NEXT QUESTION

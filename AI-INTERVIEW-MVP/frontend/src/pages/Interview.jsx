@@ -126,6 +126,28 @@ export default function Interview() {
 
   const handleNewQuestion = useCallback((qData) => {
     if (!qData) return;
+
+    // Save previous evaluated question to local answer store
+    const prevQNumber = qData.question_number - 1;
+    if (prevQNumber >= 1) {
+      const prevEntry = {
+        question_id: `q_${prevQNumber}`,
+        question_number: prevQNumber,
+        question_title: qData.previous_question_title || `Question ${prevQNumber}`,
+        difficulty: qData.previous_difficulty || 'Medium',
+        answer: qData.previous_answer || '',
+        evaluation: {
+          score: qData.score ?? 7,
+          feedback: qData.feedback || '',
+          strengths: qData.score >= 7 ? ['Accurate technical terminology', 'Good structural overview'] : [],
+          improvements: qData.score < 7 ? ['Elaborate further on trade-offs and edge cases'] : [],
+        },
+        evaluation_status: 'complete',
+        submitted_at: new Date().toISOString(),
+      };
+      saveInterviewAnswer(prevEntry, sessionKeyRef.current);
+    }
+
     setCurrentQuestion({
       id: `q_${qData.question_number}`,
       title: qData.title,
@@ -133,6 +155,37 @@ export default function Interview() {
     });
     setCurrentIndex(qData.question_number - 1);
     localStorage.setItem('current_question_index', (qData.question_number - 1).toString());
+  }, []);
+
+  const handleInterviewCompleted = useCallback(async (data) => {
+    if (!data) return;
+
+    // Save the final 5th evaluated question
+    const qNum = data.question_number || TOTAL_QUESTIONS;
+    const finalEntry = {
+      question_id: `q_${qNum}`,
+      question_number: qNum,
+      question_title: data.question_title || currentQuestionRef.current?.title || `Question ${qNum}`,
+      difficulty: data.difficulty || currentQuestionRef.current?.difficulty || 'Medium',
+      answer: data.answer || '',
+      evaluation: {
+        score: data.score ?? 7,
+        feedback: data.feedback || '',
+        strengths: data.score >= 7 ? ['Thorough response', 'Demonstrated domain expertise'] : [],
+        improvements: data.score < 7 ? ['Deepen operational and architecture details'] : [],
+      },
+      evaluation_status: 'complete',
+      submitted_at: new Date().toISOString(),
+    };
+    saveInterviewAnswer(finalEntry, sessionKeyRef.current);
+
+    // Set progress to 100%
+    setCurrentIndex(TOTAL_QUESTIONS);
+
+    // Wait briefly for interviewer completion phrase, then finalize and navigate to report
+    setTimeout(async () => {
+      await finishAndPersistInterview();
+    }, 2500);
   }, []);
 
   // Live ElevenLabs Voice Interview hook
@@ -154,6 +207,7 @@ export default function Interview() {
     candidateName,
     initialQuestion: currentQuestion,
     onNewQuestion: handleNewQuestion,
+    onInterviewCompleted: handleInterviewCompleted,
     enabled: hasStarted,
   });
 
@@ -649,15 +703,15 @@ export default function Interview() {
         {/* ── Progress bar ── */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-md">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-            <span>Progress: Question {currentIndex + 1} of {TOTAL_QUESTIONS}</span>
+            <span>Progress: Question {Math.min(currentIndex + 1, TOTAL_QUESTIONS)} of {TOTAL_QUESTIONS}</span>
             <span className="font-medium text-indigo-400">
-              {Math.round((currentIndex / TOTAL_QUESTIONS) * 100)}% Complete
+              {Math.min(100, Math.round((currentIndex / TOTAL_QUESTIONS) * 100))}% Complete
             </span>
           </div>
           <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden border border-slate-800">
             <div
               className="bg-gradient-to-r from-indigo-500 to-violet-500 h-full transition-all duration-300"
-              style={{ width: `${Math.max(10, (currentIndex / TOTAL_QUESTIONS) * 100)}%` }}
+              style={{ width: `${Math.min(100, Math.max(10, (currentIndex / TOTAL_QUESTIONS) * 100))}%` }}
             />
           </div>
         </div>
