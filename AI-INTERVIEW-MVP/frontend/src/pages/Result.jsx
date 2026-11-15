@@ -11,8 +11,11 @@ import {
   Sparkles,
   FileText,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Shield,
+  ShieldAlert,
 } from 'lucide-react';
+import { computeIntegritySummary } from '../utils/eventLogger';
 
 export default function Result() {
   const navigate = useNavigate();
@@ -21,6 +24,7 @@ export default function Result() {
   const [candidateRole, setCandidateRole] = useState('Backend Developer');
   const [submittedAnswers, setSubmittedAnswers] = useState([]);
   const [expandedIndex, setExpandedIndex] = useState(0);
+  const [integritySummary, setIntegritySummary] = useState(() => computeIntegritySummary());
 
   function loadAnswers() {
     try {
@@ -42,6 +46,7 @@ export default function Result() {
     if (savedName) setCandidateName(savedName);
     if (savedRole) setCandidateRole(savedRole);
     loadAnswers();
+    setIntegritySummary(computeIntegritySummary());
 
     // Re-read storage if Interview writes a late evaluation after navigation.
     window.addEventListener('interview-answers-updated', loadAnswers);
@@ -67,6 +72,9 @@ export default function Result() {
     evaluatedAnswers.flatMap((item) => item.evaluation.improvements || [])
   )];
 
+  const integrityScore = integritySummary.integrityScore ?? 100;
+  const suspiciousCount = integritySummary.suspiciousCount ?? 0;
+
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 flex justify-center items-center">
       <div className="w-full max-w-4xl space-y-6">
@@ -85,7 +93,7 @@ export default function Result() {
                 Evaluation Summary
               </h1>
               <p className="text-sm text-slate-400 mt-1">
-                AI evaluation summary for your {candidateRole} technical assessment.
+                AI evaluation and proctoring audit summary for your {candidateRole} technical assessment.
               </p>
             </div>
 
@@ -126,14 +134,14 @@ export default function Result() {
               </div>
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-slate-500 font-semibold">Duration</div>
-                <div className="text-sm font-medium text-slate-200">30 Minutes</div>
+                <div className="text-sm font-medium text-slate-200">30 Minutes Fixed</div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Score & Questions Summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+        {/* Score, Questions, & Security Audit Summary */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
 
           {/* Average AI Score */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
@@ -154,11 +162,11 @@ export default function Result() {
               </div>
               <div className={`text-xs mt-2 flex items-center gap-1.5 font-medium ${averageScore === null ? 'text-amber-400' : 'text-indigo-300'}`}>
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{averageScore === null ? 'No successfully evaluated answers' : 'Calculated from individual AI evaluation scores'}</span>
+                <span>{averageScore === null ? 'No evaluated answers' : 'AI evaluation score'}</span>
               </div>
             </div>
-            <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
-              Evaluation dimensions: technical correctness, relevance, and completeness
+            <div className="text-[11px] text-slate-500 mt-6 pt-3 border-t border-slate-800">
+              Evaluated on correctness and depth
             </div>
           </div>
 
@@ -167,7 +175,7 @@ export default function Result() {
             <div>
               <div className="flex items-center justify-between mb-3">
                 <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                  Questions Answered
+                  Questions
                 </span>
                 <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   Completed
@@ -177,15 +185,70 @@ export default function Result() {
                 <span className="text-4xl font-extrabold text-white">
                   {questionsCount}
                 </span>
-                <span className="text-lg text-slate-500 font-medium">/ {totalQuestions} Questions</span>
+                <span className="text-lg text-slate-500 font-medium">/ {totalQuestions}</span>
               </div>
               <div className="text-xs text-emerald-400 mt-2 flex items-center gap-1.5 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>{evaluatedAnswers.length} of {questionsCount} preserved responses evaluated</span>
+                <span>{evaluatedAnswers.length} of {questionsCount} evaluated</span>
               </div>
             </div>
-            <div className="text-xs text-slate-500 mt-6 pt-3 border-t border-slate-800">
-              Technical track: {candidateRole} (Hour 2)
+            <div className="text-[11px] text-slate-500 mt-6 pt-3 border-t border-slate-800">
+              Technical track: {candidateRole}
+            </div>
+          </div>
+
+          {/* Proctoring & Integrity Score (Hour 6) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                  Integrity Score
+                </span>
+                <span
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                    suspiciousCount === 0
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      : suspiciousCount <= 3
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                  }`}
+                >
+                  {suspiciousCount === 0 ? 'Verified' : `${suspiciousCount} Flagged`}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2 mt-2">
+                <span
+                  className={`text-4xl font-extrabold ${
+                    integrityScore >= 85
+                      ? 'text-emerald-400'
+                      : integrityScore >= 60
+                      ? 'text-amber-400'
+                      : 'text-rose-400'
+                  }`}
+                >
+                  {integrityScore}%
+                </span>
+              </div>
+              <div
+                className={`text-xs mt-2 flex items-center gap-1.5 font-medium ${
+                  suspiciousCount === 0 ? 'text-emerald-400' : 'text-amber-400'
+                }`}
+              >
+                {suspiciousCount === 0 ? (
+                  <>
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>No security infractions</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <span>{suspiciousCount} suspicious incidents</span>
+                  </>
+                )}
+              </div>
+            </div>
+            <div className="text-[11px] text-slate-500 mt-6 pt-3 border-t border-slate-800">
+              Fullscreen, tabs, clipboard & webcam
             </div>
           </div>
 

@@ -82,6 +82,8 @@ export default function Dashboard() {
       localStorage.setItem('current_question_index', '0');
       localStorage.setItem('interview_answers', JSON.stringify([]));
       localStorage.setItem('questions_answered', '0');
+      localStorage.removeItem('interview_monitoring_started');
+      localStorage.removeItem('interview_monitoring_events');
 
       // 4. Navigate to the functional Interview screen
       navigate('/interview');

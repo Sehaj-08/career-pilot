@@ -17,6 +17,11 @@ import {
   Loader2,
   TrendingUp,
   Zap,
+  Maximize2,
+  Shield,
+  AlertTriangle,
+  X,
+  Lock,
 } from 'lucide-react';
 import {
   fetchQuestionsByRole,
@@ -57,12 +62,45 @@ export default function Interview() {
   const [isSubmitting, setIsSubmitting]         = useState(false);
   const [isGenerating, setIsGenerating]         = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(TOTAL_DURATION_SECONDS);
-  const { videoRef, isCameraActive, error, faceCount } = useWebcam();
-  const { metrics, warning, updateFaceMetrics } = useMonitoring();
 
+  // Hour 6: Fullscreen gating state
+  const [hasStarted, setHasStarted] = useState(() => {
+    const savedIndex = parseInt(localStorage.getItem('current_question_index') || '0', 10);
+    const answers = readInterviewAnswers();
+    const alreadyStarted = localStorage.getItem('interview_monitoring_started') === 'true';
+    return alreadyStarted || savedIndex > 0 || answers.length > 0;
+  });
+
+  const { videoRef, isCameraActive, error, faceCount } = useWebcam();
+  const {
+    isMonitoring,
+    isFullscreen,
+    warning,
+    metrics,
+    events,
+    startMonitoring,
+    stopMonitoring,
+    requestFullscreen,
+    exitFullscreen,
+    clearWarning,
+    updateFaceMetrics,
+    handleCopy,
+    handlePaste,
+    handleCut,
+    handleContextMenu,
+  } = useMonitoring();
+
+  // Sync webcam face metrics with monitoring hook
   useEffect(() => {
     updateFaceMetrics(faceCount);
-  }, [faceCount]);
+  }, [faceCount, updateFaceMetrics]);
+
+  // If already started (e.g. page refresh), ensure monitoring is started
+  useEffect(() => {
+    if (hasStarted && !isMonitoring) {
+      startMonitoring();
+    }
+  }, [hasStarted, isMonitoring, startMonitoring]);
 
   const answerRef              = useRef('');
   const currentIndexRef        = useRef(0);
@@ -71,6 +109,7 @@ export default function Interview() {
   const submissionInProgressRef = useRef(false);
   const sessionKeyRef          = useRef(getInterviewSessionKey());
   const mountedRef             = useRef(true);
+  const isCompletingRef        = useRef(false);
 
   answerRef.current          = answer;
   currentIndexRef.current    = currentIndex;
@@ -91,9 +130,6 @@ export default function Interview() {
       if (savedIndex > 0) {
         // Resume: restore persisted question text from interview_answers
         const cached = readInterviewAnswers();
-        // We only need the question object for the CURRENT (unanswered) question.
-        // If savedIndex < cached.length, the candidate already answered it, so show
-        // the last-answered question with its evaluation and wait for Next.
         const lastEntry = cached[savedIndex - 1];
         if (lastEntry) {
           setCurrentQuestion({ id: lastEntry.question_id, title: lastEntry.question_title, difficulty: lastEntry.difficulty });
@@ -159,7 +195,11 @@ export default function Interview() {
     return () => clearInterval(timerInterval);
   }, []);
 
-  const handleTimeExpired = () => {
+  const handleTimeExpired = async () => {
+    isCompletingRef.current = true;
+    stopMonitoring();
+    await exitFullscreen();
+
     const typedAnswer  = answerRef.current.trim();
     const activeQ      = currentQuestionRef.current;
     const activeIndex  = currentIndexRef.current;
@@ -190,7 +230,15 @@ export default function Interview() {
 
   const isLastQuestion = currentIndex >= TOTAL_QUESTIONS - 1;
 
-  // ── 3. Submit answer → evaluate ───────────────────────────────────────────
+  // ── 3. Start Fullscreen Gated Session ─────────────────────────────────────
+  const handleStartFullscreen = async () => {
+    await requestFullscreen();
+    startMonitoring();
+    localStorage.setItem('interview_monitoring_started', 'true');
+    setHasStarted(true);
+  };
+
+  // ── 4. Submit answer → evaluate ───────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     const submittedAnswer = answer.trim();
@@ -247,11 +295,15 @@ export default function Interview() {
     }
   };
 
-  // ── 4. Request next adaptive question ─────────────────────────────────────
+  // ── 5. Request next adaptive question ─────────────────────────────────────
   const handleNextQuestion = async () => {
     if (!evaluation) return;
 
     if (isLastQuestion) {
+      // Clean completion: stop monitoring first to avoid false exit alert
+      isCompletingRef.current = true;
+      stopMonitoring();
+      await exitFullscreen();
       navigate('/result');
       return;
     }
@@ -265,7 +317,7 @@ export default function Interview() {
         currentQuestion.title,
         answer,
         evaluation.score,
-        currentIndex + 1,       // 1-based current question number
+        currentIndex + 1,
         interviewId,
       );
 
@@ -296,7 +348,7 @@ export default function Interview() {
     }
   };
 
-  // ── 5. Restore a draft / evaluated state on page refresh ─────────────────
+  // ── 6. Restore a draft / evaluated state on page refresh ─────────────────
   useEffect(() => {
     if (!currentQuestion) return;
     const cached   = readInterviewAnswers();
@@ -321,11 +373,111 @@ export default function Interview() {
     );
   }
 
+  // ── Pre-Interview Fullscreen Gate Modal ────────────────────────────────────
+  if (!hasStarted) {
+    return (
+      <div className="min-h-[calc(100vh-4rem)] bg-slate-950 flex items-center justify-center p-4">
+        <div className="w-full max-w-xl bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 flex-shrink-0">
+              <Shield className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
+                Security & Proctoring Verification
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+                Technical Assessment – {candidateRole}
+              </p>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 space-y-3 text-xs sm:text-sm text-slate-300">
+            <div className="font-semibold text-slate-200 flex items-center gap-2">
+              <Lock className="w-4 h-4 text-indigo-400" />
+              <span>Assessment Protocol & Rules:</span>
+            </div>
+            <ul className="space-y-2 text-slate-400">
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <span><strong className="text-slate-200">Fullscreen Required:</strong> The interview runs exclusively in fullscreen mode to ensure fairness.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <span><strong className="text-slate-200">Restricted Clipboard:</strong> Copying, cutting, and pasting are disabled inside the interface.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <span><strong className="text-slate-200">Tab & Focus Monitoring:</strong> Switching tabs or windows will be logged as suspicious activity.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0 mt-0.5" />
+                <span><strong className="text-slate-200">Webcam Proctoring:</strong> Face presence tracking will be active throughout your 30-minute session.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="pt-2">
+            <button
+              type="button"
+              onClick={handleStartFullscreen}
+              className="w-full py-4 px-6 bg-gradient-to-r from-indigo-600 via-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold rounded-2xl text-base shadow-xl shadow-indigo-600/25 transition-all flex items-center justify-center gap-3 active:scale-[0.99]"
+            >
+              <Maximize2 className="w-5 h-5" />
+              <span>Start Fullscreen Interview</span>
+            </button>
+            <p className="text-[11px] text-slate-500 text-center mt-3">
+              Clicking will request fullscreen mode and immediately initiate proctoring.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const diffStyle = DIFFICULTY_STYLES[currentQuestion.difficulty] || DIFFICULTY_STYLES.Medium;
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8">
+    <div
+      onCopy={handleCopy}
+      onPaste={handlePaste}
+      onCut={handleCut}
+      onContextMenu={handleContextMenu}
+      className="min-h-[calc(100vh-4rem)] bg-slate-950 p-4 sm:p-6 lg:p-8 select-text"
+    >
       <div className="max-w-7xl mx-auto space-y-6">
+
+        {/* ── Top Warning Banner (Hour 6) ── */}
+        {warning && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-lg animate-fadeIn">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0" />
+              <div className="text-sm font-medium text-amber-200">
+                {warning}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {!isFullscreen && (
+                <button
+                  type="button"
+                  onClick={requestFullscreen}
+                  className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-colors flex items-center gap-1.5"
+                >
+                  <Maximize2 className="w-3.5 h-3.5" />
+                  <span>Re-enter Fullscreen</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={clearWarning}
+                className="p-1 rounded-lg text-amber-300 hover:bg-amber-500/20 transition-colors"
+                title="Dismiss warning"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ── Header bar ── */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 flex flex-wrap items-center justify-between gap-4 shadow-xl">
@@ -369,7 +521,7 @@ export default function Interview() {
           </div>
         </div>
 
-        {/* ── Main content ── */}
+        {/* ── Main content grid ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
           {/* ── Left: Question + Answer form ── */}
@@ -404,7 +556,7 @@ export default function Interview() {
               </p>
             </div>
 
-            {/* Answer form */}
+            {/* Answer form (Controlled Textarea - Protected from Copy/Paste/Cut) */}
             <form onSubmit={handleSubmit} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-7 shadow-xl space-y-4">
               <div className="flex items-center justify-between">
                 <label htmlFor="interviewAnswer" className="text-sm font-semibold text-slate-200">
@@ -424,7 +576,7 @@ export default function Interview() {
                   if (submitError) setSubmitError('');
                 }}
                 disabled={isSubmitting || Boolean(evaluation)}
-                placeholder="Type your technical answer here. Address key concepts, mechanisms, and implementation details…"
+                placeholder="Type your technical answer directly here. Address key concepts, mechanisms, and implementation details (Pasting is blocked)…"
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-4 text-slate-100 placeholder-slate-500 text-sm focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 resize-y leading-relaxed disabled:opacity-75 disabled:cursor-not-allowed"
                 required
               />
@@ -556,7 +708,7 @@ export default function Interview() {
             )}
           </div>
 
-          {/* ── Right: Webcam + Monitoring placeholders ── */}
+          {/* ── Right: Webcam + Monitoring Panels ── */}
           <div className="space-y-6">
 
             <WebcamMonitor
@@ -565,9 +717,14 @@ export default function Interview() {
               error={error}
               faceCount={faceCount}
             />
+
             <MonitoringPanel
               metrics={metrics}
+              events={events}
               warning={warning}
+              isFullscreen={isFullscreen}
+              onRequestFullscreen={requestFullscreen}
+              isMonitoring={isMonitoring}
             />
 
           </div>
