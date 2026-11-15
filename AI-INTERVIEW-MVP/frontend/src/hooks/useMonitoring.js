@@ -5,12 +5,15 @@ import {
   computeIntegritySummary,
   EVENT_TYPES,
 } from '../utils/eventLogger';
+import { useStrikeManager, STRIKE_CATEGORIES, CATEGORY_LABELS } from './useStrikeManager';
 
-export function useMonitoring() {
+export function useMonitoring(onTerminate = null) {
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
   const [warning, setWarning] = useState('');
   const [events, setEvents] = useState(() => getStoredEvents());
+
+  const strikeManager = useStrikeManager(null, onTerminate);
 
   const [metrics, setMetrics] = useState(() => {
     const summary = computeIntegritySummary();
@@ -51,7 +54,7 @@ export function useMonitoring() {
     if (autoDismiss) {
       warningTimeoutRef.current = setTimeout(() => {
         setWarning('');
-      }, 4000);
+      }, 5000);
     }
   }, []);
 
@@ -76,13 +79,14 @@ export function useMonitoring() {
         }
       }
       setIsFullscreen(true);
+      strikeManager.clearActiveIncident(STRIKE_CATEGORIES.FULLSCREEN_EXIT);
       return true;
     } catch (err) {
       console.warn('[useMonitoring] Fullscreen request rejected or unavailable:', err);
       triggerWarning('Fullscreen request was blocked by browser. Please enable permissions.', true);
       return false;
     }
-  }, [triggerWarning]);
+  }, [triggerWarning, strikeManager]);
 
   const exitFullscreen = useCallback(async () => {
     try {
@@ -115,6 +119,18 @@ export function useMonitoring() {
     refreshMetrics();
   }, [clearWarning, refreshMetrics]);
 
+  // ── Handle Camera Violations from MediaPipe WebCam hook ─────────────────────
+  const handleCameraViolation = useCallback((category, message) => {
+    if (!isMonitoringRef.current) return;
+    const res = strikeManager.registerViolation(category, message);
+    if (res.isTerminated) {
+      triggerWarning(`TERMINATION: 2nd Strike for ${CATEGORY_LABELS[category] || category}! Interview terminating.`, false);
+    } else if (res.warning) {
+      triggerWarning(res.warning, false);
+    }
+    refreshMetrics();
+  }, [strikeManager, triggerWarning, refreshMetrics]);
+
   // ── Update Face Metrics from Hour 5 Webcam Hook ────────────────────────────
   const updateFaceMetrics = useCallback((count) => {
     if (!isMonitoringRef.current) return;
@@ -123,7 +139,14 @@ export function useMonitoring() {
       faceDetected: count > 0,
       multipleFaces: count > 1,
     }));
-  }, []);
+
+    // When face state returns to normal single candidate, clear active camera incidents
+    // so subsequent incidents can legally be counted toward strikes
+    if (count === 1) {
+      strikeManager.clearActiveIncident(STRIKE_CATEGORIES.FACE_ABSENT);
+      strikeManager.clearActiveIncident(STRIKE_CATEGORIES.MULTIPLE_FACES);
+    }
+  }, [strikeManager]);
 
   // ── Clipboard & Context Menu Restrictions (Blocked) ─────────────────────────
   const handleCopy = useCallback((e) => {
@@ -163,9 +186,17 @@ export function useMonitoring() {
 
       if (isMonitoringRef.current) {
         if (!active) {
-          logEvent(EVENT_TYPES.FULLSCREEN_EXIT, 'Candidate exited fullscreen mode');
-          triggerWarning('Warning: Fullscreen exited! Please click Re-enter Fullscreen to resume.', false);
+          const res = strikeManager.registerViolation(
+            STRIKE_CATEGORIES.FULLSCREEN_EXIT,
+            'Candidate exited fullscreen mode'
+          );
+          if (res.isTerminated) {
+            triggerWarning('TERMINATION: 2nd Strike for Fullscreen Exit! Interview terminating.', false);
+          } else {
+            triggerWarning(res.warning || 'Warning: Strike 1/2 in Fullscreen Exit! Please click Re-enter Fullscreen immediately.', false);
+          }
         } else {
+          strikeManager.clearActiveIncident(STRIKE_CATEGORIES.FULLSCREEN_EXIT);
           logEvent(EVENT_TYPES.FULLSCREEN_ENTER, 'Candidate re-entered fullscreen mode');
           clearWarning();
         }
@@ -176,16 +207,23 @@ export function useMonitoring() {
       if (!isMonitoringRef.current) return;
 
       if (document.hidden || document.visibilityState === 'hidden') {
-        logEvent(EVENT_TYPES.TAB_SWITCH, 'Candidate switched tabs or minimized window');
-        triggerWarning('Tab switch detected! Please keep the interview window focused.');
+        const res = strikeManager.registerViolation(
+          STRIKE_CATEGORIES.TAB_SWITCH,
+          'Candidate switched tabs or minimized window'
+        );
+        if (res.isTerminated) {
+          triggerWarning('TERMINATION: 2nd Strike for Tab Switching! Interview terminating.', false);
+        } else {
+          triggerWarning(res.warning || 'Tab switch detected! Strike 1/2 recorded.', true);
+        }
+      } else {
+        strikeManager.clearActiveIncident(STRIKE_CATEGORIES.TAB_SWITCH);
       }
     };
 
     const handleWindowBlur = () => {
       if (!isMonitoringRef.current) return;
-      // When window loses focus (e.g. clicking external app or second screen)
       logEvent(EVENT_TYPES.WINDOW_BLUR, 'Browser window lost focus');
-      triggerWarning('Window focus lost! Please stay focused on the interview.');
     };
 
     const handleCustomLogEvent = () => {
@@ -206,7 +244,7 @@ export function useMonitoring() {
       window.removeEventListener('monitoring-event-logged', handleCustomLogEvent);
       if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
     };
-  }, [triggerWarning, clearWarning, refreshMetrics]);
+  }, [triggerWarning, clearWarning, refreshMetrics, strikeManager]);
 
   return {
     isMonitoring,
@@ -214,12 +252,17 @@ export function useMonitoring() {
     warning,
     metrics,
     events,
+    strikes: strikeManager.strikes,
+    isTerminated: strikeManager.isTerminated,
+    terminationReason: strikeManager.terminationReason,
+    strikeManager,
     startMonitoring,
     stopMonitoring,
     requestFullscreen,
     exitFullscreen,
     clearWarning,
     updateFaceMetrics,
+    handleCameraViolation,
     handleCopy,
     handlePaste,
     handleCut,

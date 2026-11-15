@@ -13,7 +13,9 @@ import {
   MousePointer,
   UserX,
   Users,
+  AlertOctagon,
 } from 'lucide-react';
+import { STRIKE_CATEGORIES, CATEGORY_LABELS, MAX_STRIKES_PER_CATEGORY } from '../hooks/useStrikeManager';
 
 export default function MonitoringPanel({
   metrics = {
@@ -24,6 +26,12 @@ export default function MonitoringPanel({
     integrityScore: 100,
     isFullscreen: true,
   },
+  strikes = {
+    [STRIKE_CATEGORIES.TAB_SWITCH]: 0,
+    [STRIKE_CATEGORIES.FULLSCREEN_EXIT]: 0,
+    [STRIKE_CATEGORIES.MULTIPLE_FACES]: 0,
+    [STRIKE_CATEGORIES.FACE_ABSENT]: 0,
+  },
   events = [],
   warning = '',
   isFullscreen = true,
@@ -33,7 +41,11 @@ export default function MonitoringPanel({
   const suspiciousCount = metrics.suspiciousCount ?? 0;
   const integrityScore = metrics.integrityScore ?? 100;
 
-  // Determine status color scheme
+  const totalStrikes = Object.values(strikes || {}).reduce((acc, val) => acc + (val || 0), 0);
+  const anyCategoryCritical = Object.values(strikes || {}).some((v) => v >= 2);
+  const anyCategoryWarning = Object.values(strikes || {}).some((v) => v === 1);
+
+  // Status badge styling
   let statusBadge = {
     bg: 'bg-emerald-500/10',
     border: 'border-emerald-500/20',
@@ -50,23 +62,30 @@ export default function MonitoringPanel({
       dot: 'bg-slate-500',
       label: 'Inactive',
     };
-  } else if (suspiciousCount > 3 || !isFullscreen) {
+  } else if (anyCategoryCritical) {
     statusBadge = {
       bg: 'bg-rose-500/10',
       border: 'border-rose-500/20',
       text: 'text-rose-400',
       dot: 'bg-rose-500',
-      label: 'Warning',
+      label: 'Terminated',
     };
-  } else if (suspiciousCount > 0) {
+  } else if (anyCategoryWarning || !isFullscreen) {
     statusBadge = {
       bg: 'bg-amber-500/10',
       border: 'border-amber-500/20',
       text: 'text-amber-400',
       dot: 'bg-amber-500',
-      label: 'Attention',
+      label: '1 Strike Warning',
     };
   }
+
+  const strikeCategories = [
+    { key: STRIKE_CATEGORIES.TAB_SWITCH, label: 'Tab Switching' },
+    { key: STRIKE_CATEGORIES.FULLSCREEN_EXIT, label: 'Fullscreen Exit' },
+    { key: STRIKE_CATEGORIES.MULTIPLE_FACES, label: 'Multiple Faces' },
+    { key: STRIKE_CATEGORIES.FACE_ABSENT, label: 'No Face' },
+  ];
 
   // Helper to choose event icon
   const getEventIcon = (type) => {
@@ -103,7 +122,6 @@ export default function MonitoringPanel({
     }
   };
 
-  // Recent 10 events, newest first
   const displayEvents = [...events].reverse().slice(0, 10);
 
   return (
@@ -111,13 +129,15 @@ export default function MonitoringPanel({
       {/* ── Top Header ── */}
       <div className="flex items-center justify-between pb-3 border-b border-slate-800">
         <div className="flex items-center gap-2">
-          {suspiciousCount > 0 ? (
+          {anyCategoryCritical ? (
+            <AlertOctagon className="w-4 h-4 text-rose-400" />
+          ) : anyCategoryWarning ? (
             <ShieldAlert className="w-4 h-4 text-amber-400" />
           ) : (
             <Shield className="w-4 h-4 text-indigo-400" />
           )}
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-200">
-            Security Monitor
+            Two-Strike Security Monitor
           </span>
         </div>
 
@@ -127,24 +147,62 @@ export default function MonitoringPanel({
         </div>
       </div>
 
-      {/* ── Status Grid ── */}
-      <div className="grid grid-cols-2 gap-2 text-xs">
+      {/* ── Two-Strike Category Matrix ── */}
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          <span>Violation Policy</span>
+          <span className="text-[10px] text-slate-500 font-normal">2 Strikes = Termination</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {strikeCategories.map(({ key, label }) => {
+            const count = strikes?.[key] || 0;
+            const isCritical = count >= MAX_STRIKES_PER_CATEGORY;
+            const isWarning = count === 1;
+
+            return (
+              <div
+                key={key}
+                className={`p-2.5 rounded-xl border flex items-center justify-between transition-colors ${
+                  isCritical
+                    ? 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+                    : isWarning
+                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                    : 'bg-slate-950/70 border-slate-800 text-slate-300'
+                }`}
+              >
+                <span className="text-[11px] font-medium truncate">{label}</span>
+                <span
+                  className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                    isCritical
+                      ? 'bg-rose-500 text-white'
+                      : isWarning
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'bg-slate-900 text-slate-400 border border-slate-800'
+                  }`}
+                >
+                  {count} / {MAX_STRIKES_PER_CATEGORY}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ── Status Indicators ── */}
+      <div className="grid grid-cols-2 gap-2 text-xs pt-1">
         {/* Fullscreen Status */}
-        <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-          <span className="text-[11px] text-slate-400 font-medium">Fullscreen</span>
-          <div className="flex items-center justify-between mt-1">
-            <span
-              className={`font-semibold text-xs ${
-                isFullscreen ? 'text-emerald-400' : 'text-rose-400'
-              }`}
-            >
+        <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+          <span className="text-[11px] text-slate-400">Fullscreen:</span>
+          <div className="flex items-center gap-1.5">
+            <span className={`text-[11px] font-bold ${isFullscreen ? 'text-emerald-400' : 'text-rose-400'}`}>
               {isFullscreen ? 'Active' : 'Exited'}
             </span>
             {!isFullscreen && onRequestFullscreen && (
               <button
                 type="button"
                 onClick={onRequestFullscreen}
-                className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 transition-colors"
+                className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30"
               >
                 Re-enter
               </button>
@@ -152,49 +210,19 @@ export default function MonitoringPanel({
           </div>
         </div>
 
-        {/* Tab Monitoring */}
-        <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-          <span className="text-[11px] text-slate-400 font-medium">Tab Monitoring</span>
+        {/* Face Status */}
+        <div className="p-2 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between">
+          <span className="text-[11px] text-slate-400">Face Status:</span>
           <span
-            className={`font-semibold text-xs mt-1 ${
-              metrics.tabSwitches === 0 ? 'text-emerald-400' : 'text-amber-400'
-            }`}
-          >
-            {metrics.tabSwitches === 0 ? 'Normal' : `${metrics.tabSwitches} Switches`}
-          </span>
-        </div>
-
-        {/* Face Detection Status (Hour 5) */}
-        <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-          <span className="text-[11px] text-slate-400 font-medium">Face Presence</span>
-          <span
-            className={`font-semibold text-xs mt-1 ${
-              metrics.faceDetected && !metrics.multipleFaces
+            className={`text-[11px] font-bold ${
+              metrics.multipleFaces
+                ? 'text-rose-400'
+                : metrics.faceDetected
                 ? 'text-emerald-400'
                 : 'text-amber-400'
             }`}
           >
-            {metrics.multipleFaces
-              ? 'Multiple Faces'
-              : metrics.faceDetected
-              ? 'Centered'
-              : 'Not Detected'}
-          </span>
-        </div>
-
-        {/* Suspicious Activities Counter */}
-        <div className="p-2.5 rounded-xl bg-slate-950/70 border border-slate-800 flex flex-col justify-between">
-          <span className="text-[11px] text-slate-400 font-medium">Suspicious Activities</span>
-          <span
-            className={`font-bold text-xs mt-1 ${
-              suspiciousCount === 0
-                ? 'text-emerald-400'
-                : suspiciousCount <= 3
-                ? 'text-amber-400'
-                : 'text-rose-400'
-            }`}
-          >
-            {suspiciousCount} {suspiciousCount === 1 ? 'Event' : 'Events'}
+            {metrics.multipleFaces ? 'Multiple' : metrics.faceDetected ? 'Centered' : 'Absent'}
           </span>
         </div>
       </div>
@@ -239,11 +267,11 @@ export default function MonitoringPanel({
           <span className="text-[10px] text-slate-500">{events.length} logged</span>
         </div>
 
-        <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
+        <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
           {displayEvents.length === 0 ? (
             <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800/60 text-[11px] text-slate-500 text-center flex items-center justify-center gap-1.5">
               <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500/60" />
-              <span>No suspicious activity detected</span>
+              <span>Zero infractions recorded</span>
             </div>
           ) : (
             displayEvents.map((evt) => (

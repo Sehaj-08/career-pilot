@@ -38,6 +38,7 @@ import { getStoredEvents } from '../utils/eventLogger';
 import { buildInterviewReport } from '../utils/scoreCalculator';
 import WebcamMonitor from '../components/WebcamMonitor';
 import MonitoringPanel from '../components/MonitoringPanel';
+import TerminationModal from '../components/TerminationModal';
 
 const TOTAL_DURATION_SECONDS = 30 * 60;
 const TOTAL_QUESTIONS = 5;
@@ -74,24 +75,35 @@ export default function Interview() {
     return alreadyStarted || savedIndex > 0 || answers.length > 0;
   });
 
-  const { videoRef, isCameraActive, error, faceCount } = useWebcam();
+  const handleStrikeTerminationRef = useRef(null);
+
   const {
     isMonitoring,
     isFullscreen,
     warning,
     metrics,
     events,
+    strikes,
+    isTerminated,
+    terminationReason,
     startMonitoring,
     stopMonitoring,
     requestFullscreen,
     exitFullscreen,
     clearWarning,
     updateFaceMetrics,
+    handleCameraViolation,
     handleCopy,
     handlePaste,
     handleCut,
     handleContextMenu,
-  } = useMonitoring();
+  } = useMonitoring((cat, reason, updatedStrikes) => {
+    if (handleStrikeTerminationRef.current) {
+      handleStrikeTerminationRef.current(cat, reason, updatedStrikes);
+    }
+  });
+
+  const { videoRef, isCameraActive, error, faceCount, stopWebcam } = useWebcam(handleCameraViolation);
 
   // Sync webcam face metrics with monitoring hook
   useEffect(() => {
@@ -100,10 +112,10 @@ export default function Interview() {
 
   // If already started (e.g. page refresh), ensure monitoring is started
   useEffect(() => {
-    if (hasStarted && !isMonitoring) {
+    if (hasStarted && !isMonitoring && !isTerminated) {
       startMonitoring();
     }
-  }, [hasStarted, isMonitoring, startMonitoring]);
+  }, [hasStarted, isMonitoring, isTerminated, startMonitoring]);
 
   const answerRef              = useRef('');
   const currentIndexRef        = useRef(0);
@@ -118,6 +130,39 @@ export default function Interview() {
   currentIndexRef.current    = currentIndex;
   currentQuestionRef.current = currentQuestion;
   evaluationRef.current      = evaluation;
+
+  // Implementation of two-strike termination callback
+  handleStrikeTerminationRef.current = async (category, reason, updatedStrikes) => {
+    if (isCompletingRef.current) return;
+    isCompletingRef.current = true;
+
+    stopMonitoring();
+    stopWebcam();
+    await exitFullscreen();
+
+    const answers = readInterviewAnswers();
+    const storedEvents = getStoredEvents(interviewId);
+    const reportPayload = buildInterviewReport(
+      candidateName,
+      candidateRole,
+      interviewId,
+      answers,
+      storedEvents
+    );
+
+    reportPayload.status = 'terminated';
+    reportPayload.termination_reason = reason;
+    reportPayload.strikes_detail = updatedStrikes;
+
+    try {
+      await saveInterviewResult(reportPayload);
+      localStorage.setItem('interview_saved_to_db', 'true');
+    } catch (err) {
+      console.warn('Backend SQLite save failed on termination:', err);
+      localStorage.setItem('interview_saved_to_db', 'false');
+      localStorage.setItem('interview_report_pending', JSON.stringify(reportPayload));
+    }
+  };
 
   useEffect(() => {
     mountedRef.current = true;
@@ -187,6 +232,10 @@ export default function Interview() {
     setSecondsRemaining(calculateRemaining());
 
     const timerInterval = setInterval(() => {
+      if (isTerminated) {
+        clearInterval(timerInterval);
+        return;
+      }
       const remaining = calculateRemaining();
       setSecondsRemaining(remaining);
       if (remaining <= 0) {
@@ -196,12 +245,13 @@ export default function Interview() {
     }, 1000);
 
     return () => clearInterval(timerInterval);
-  }, []);
+  }, [isTerminated]);
 
   const finishAndPersistInterview = async (extraDraft = null) => {
     if (isCompletingRef.current) return;
     isCompletingRef.current = true;
     stopMonitoring();
+    stopWebcam();
     await exitFullscreen();
 
     if (extraDraft) {
@@ -217,6 +267,10 @@ export default function Interview() {
       answers,
       storedEvents
     );
+
+    reportPayload.status = 'completed';
+    reportPayload.termination_reason = null;
+    reportPayload.strikes_detail = strikes;
 
     try {
       await saveInterviewResult(reportPayload);
@@ -386,6 +440,18 @@ export default function Interview() {
       setEvaluation(null);
     }
   }, [currentQuestion?.id]);
+
+  // ── Two-Strike Terminated Screen ──────────────────────────────────────────
+  if (isTerminated) {
+    return (
+      <TerminationModal
+        candidateName={candidateName}
+        candidateRole={candidateRole}
+        terminationReason={terminationReason}
+        strikes={strikes}
+      />
+    );
+  }
 
   if (!currentQuestion) {
     return (
@@ -745,6 +811,7 @@ export default function Interview() {
 
             <MonitoringPanel
               metrics={metrics}
+              strikes={strikes}
               events={events}
               warning={warning}
               isFullscreen={isFullscreen}

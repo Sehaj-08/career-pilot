@@ -19,7 +19,7 @@ def get_db_connection() -> sqlite3.Connection:
 
 
 def init_db() -> None:
-    """Initialize the SQLite database and create tables if they do not exist."""
+    """Initialize the SQLite database and create or migrate tables."""
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
@@ -36,13 +36,28 @@ def init_db() -> None:
                 feedback TEXT NOT NULL,
                 question_details TEXT NOT NULL,
                 monitoring_events TEXT NOT NULL,
-                completed_at TEXT NOT NULL
+                completed_at TEXT NOT NULL,
+                status TEXT DEFAULT 'completed',
+                termination_reason TEXT DEFAULT NULL,
+                strikes_detail TEXT DEFAULT '{}'
             )
             """
         )
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_results_interview_id ON results (interview_id)"
         )
+
+        # Safe migration check: add missing columns if upgrading an existing DB
+        cursor.execute("PRAGMA table_info(results)")
+        existing_cols = {row["name"] for row in cursor.fetchall()}
+
+        if "status" not in existing_cols:
+            cursor.execute("ALTER TABLE results ADD COLUMN status TEXT DEFAULT 'completed'")
+        if "termination_reason" not in existing_cols:
+            cursor.execute("ALTER TABLE results ADD COLUMN termination_reason TEXT DEFAULT NULL")
+        if "strikes_detail" not in existing_cols:
+            cursor.execute("ALTER TABLE results ADD COLUMN strikes_detail TEXT DEFAULT '{}'")
+
         conn.commit()
     finally:
         conn.close()
@@ -52,19 +67,24 @@ def save_result(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Save or update an interview result in SQLite.
     Prevents duplicates on identical interview_id by updating the existing record.
+    Supports both normal completion and two-strike termination.
     """
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         question_details_json = json.dumps(data.get("question_details", []))
         monitoring_events_json = json.dumps(data.get("monitoring_events", []))
+        strikes_detail_json = json.dumps(data.get("strikes_detail", {}))
+        status_val = data.get("status", "completed")
+        termination_reason = data.get("termination_reason")
 
         cursor.execute(
             """
             INSERT INTO results (
                 interview_id, candidate, role, score, total_questions,
-                warnings, feedback, question_details, monitoring_events, completed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                warnings, feedback, question_details, monitoring_events, completed_at,
+                status, termination_reason, strikes_detail
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(interview_id) DO UPDATE SET
                 candidate = excluded.candidate,
                 role = excluded.role,
@@ -74,7 +94,10 @@ def save_result(data: Dict[str, Any]) -> Dict[str, Any]:
                 feedback = excluded.feedback,
                 question_details = excluded.question_details,
                 monitoring_events = excluded.monitoring_events,
-                completed_at = excluded.completed_at
+                completed_at = excluded.completed_at,
+                status = excluded.status,
+                termination_reason = excluded.termination_reason,
+                strikes_detail = excluded.strikes_detail
             """,
             (
                 data["interview_id"],
@@ -87,6 +110,9 @@ def save_result(data: Dict[str, Any]) -> Dict[str, Any]:
                 question_details_json,
                 monitoring_events_json,
                 data.get("completed_at", ""),
+                status_val,
+                termination_reason,
+                strikes_detail_json,
             ),
         )
         conn.commit()
@@ -102,7 +128,8 @@ def save_result(data: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "id": row_id,
             "interview_id": data["interview_id"],
-            "status": "success",
+            "status": status_val,
+            "termination_reason": termination_reason,
         }
     finally:
         conn.close()
@@ -116,7 +143,8 @@ def get_result(interview_id: str) -> Optional[Dict[str, Any]]:
         cursor.execute(
             """
             SELECT id, interview_id, candidate, role, score, total_questions,
-                   warnings, feedback, question_details, monitoring_events, completed_at
+                   warnings, feedback, question_details, monitoring_events, completed_at,
+                   status, termination_reason, strikes_detail
             FROM results
             WHERE interview_id = ?
             """,
@@ -125,6 +153,22 @@ def get_result(interview_id: str) -> Optional[Dict[str, Any]]:
         row = cursor.fetchone()
         if not row:
             return None
+
+        # Safely parse JSON fields
+        try:
+            q_details = json.loads(row["question_details"])
+        except Exception:
+            q_details = []
+
+        try:
+            m_events = json.loads(row["monitoring_events"])
+        except Exception:
+            m_events = []
+
+        try:
+            s_detail = json.loads(row["strikes_detail"]) if row["strikes_detail"] else {}
+        except Exception:
+            s_detail = {}
 
         return {
             "id": row["id"],
@@ -135,9 +179,12 @@ def get_result(interview_id: str) -> Optional[Dict[str, Any]]:
             "total_questions": row["total_questions"],
             "warnings": row["warnings"],
             "feedback": row["feedback"],
-            "question_details": json.loads(row["question_details"]),
-            "monitoring_events": json.loads(row["monitoring_events"]),
+            "question_details": q_details,
+            "monitoring_events": m_events,
             "completed_at": row["completed_at"],
+            "status": row["status"] if "status" in row.keys() and row["status"] else "completed",
+            "termination_reason": row["termination_reason"] if "termination_reason" in row.keys() else None,
+            "strikes_detail": s_detail,
         }
     finally:
         conn.close()

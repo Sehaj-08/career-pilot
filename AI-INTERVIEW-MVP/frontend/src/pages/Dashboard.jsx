@@ -84,6 +84,9 @@ export default function Dashboard() {
       localStorage.setItem('questions_answered', '0');
       localStorage.removeItem('interview_monitoring_started');
       localStorage.removeItem('interview_monitoring_events');
+      localStorage.removeItem('interview_strikes');
+      localStorage.removeItem('interview_status');
+      localStorage.removeItem('interview_termination_reason');
 
       // 4. Navigate to the functional Interview screen
       navigate('/interview');

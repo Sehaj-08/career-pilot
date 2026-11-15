@@ -20,6 +20,8 @@ def create_result(submission: ResultSubmission):
             "message": "Interview result saved successfully",
             "id": saved["id"],
             "interview_id": saved["interview_id"],
+            "interview_status": saved.get("status", "completed"),
+            "termination_reason": saved.get("termination_reason"),
         }
     except Exception as exc:
         raise HTTPException(
@@ -54,4 +56,7 @@ def read_result(interview_id: str):
         "question_details": record["question_details"],
         "monitoring_events": record["monitoring_events"],
         "completed_at": record["completed_at"],
+        "status": record.get("status", "completed"),
+        "termination_reason": record.get("termination_reason"),
+        "strikes_detail": record.get("strikes_detail", {}),
     }

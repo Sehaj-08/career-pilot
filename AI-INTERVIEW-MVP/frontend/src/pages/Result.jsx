@@ -26,6 +26,7 @@ import {
   MousePointer,
   UserX,
   Users,
+  AlertOctagon,
 } from 'lucide-react';
 import { fetchInterviewResult, saveInterviewResult } from '../services/api';
 import {
@@ -157,6 +158,17 @@ export default function Result() {
   const integritySummary = computeIntegritySummary(interviewId);
   const integrityScore = integritySummary.integrityScore ?? 100;
 
+  const isTerminatedSession = dbRecord?.status === 'terminated' || localStorage.getItem('interview_status') === 'terminated';
+  const terminationReasonText = dbRecord?.termination_reason || localStorage.getItem('interview_termination_reason') || '';
+  const strikesDetail = dbRecord?.strikes_detail || (() => {
+    try {
+      const raw = localStorage.getItem('interview_strikes');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  })();
+
   // Icon selector for monitoring events
   const getEventIcon = (type) => {
     switch (type) {
@@ -194,10 +206,17 @@ export default function Result() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
             <div>
               <div className="flex flex-wrap items-center gap-2 mb-3">
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Interview Assessment Completed</span>
-                </span>
+                {isTerminatedSession ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 text-xs font-semibold">
+                    <AlertOctagon className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Terminated Early (Two-Strike Policy)</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Interview Assessment Completed</span>
+                  </span>
+                )}
 
                 {isDbSynced ? (
                   <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-xs font-semibold">
@@ -237,6 +256,21 @@ export default function Result() {
               <span>Back to Dashboard</span>
             </button>
           </div>
+
+          {isTerminatedSession && (
+            <div className="mt-5 p-4 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-200 text-xs sm:text-sm space-y-1">
+              <div className="font-bold flex items-center gap-2 text-rose-300">
+                <AlertOctagon className="w-4 h-4 text-rose-400" />
+                <span>Academic Integrity Termination:</span>
+              </div>
+              <p className="text-slate-200">
+                {terminationReasonText || 'The interview was terminated because the candidate exceeded the 2-strike violation limit.'}
+              </p>
+              <p className="text-[11px] text-slate-400 pt-0.5">
+                * Note: All scores, feedback, and performance metrics below represent a partial evaluation of answers submitted prior to termination.
+              </p>
+            </div>
+          )}
 
           {syncError && (
             <div className="mt-4 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
@@ -588,6 +622,40 @@ export default function Result() {
             <span className="text-xs text-slate-500">
               Integrity Score: <strong className="text-slate-300">{integrityScore}%</strong>
             </span>
+          </div>
+
+          {/* Two-Strike Policy Status */}
+          <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
+              <span>Category Violation Strikes (2-Strike Policy)</span>
+              <span className="text-[10px] text-slate-500">Threshold: 2 Strikes = Auto-Termination</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">Tab Switches:</span>
+                <span className={`font-bold ${(strikesDetail.tab_switch || 0) >= 2 ? 'text-rose-400' : (strikesDetail.tab_switch || 0) === 1 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {strikesDetail.tab_switch || 0} / 2
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">Fullscreen Exits:</span>
+                <span className={`font-bold ${(strikesDetail.fullscreen_exit || 0) >= 2 ? 'text-rose-400' : (strikesDetail.fullscreen_exit || 0) === 1 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {strikesDetail.fullscreen_exit || 0} / 2
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">Multiple Faces:</span>
+                <span className={`font-bold ${(strikesDetail.multiple_faces || 0) >= 2 ? 'text-rose-400' : (strikesDetail.multiple_faces || 0) === 1 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {strikesDetail.multiple_faces || 0} / 2
+                </span>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex justify-between items-center">
+                <span className="text-slate-400 text-[11px]">No Face:</span>
+                <span className={`font-bold ${(strikesDetail.face_absent || 0) >= 2 ? 'text-rose-400' : (strikesDetail.face_absent || 0) === 1 ? 'text-amber-400' : 'text-emerald-400'}`}>
+                  {strikesDetail.face_absent || 0} / 2
+                </span>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">

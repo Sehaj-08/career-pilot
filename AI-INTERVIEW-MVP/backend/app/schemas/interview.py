@@ -108,6 +108,9 @@ class ResultSubmission(BaseModel):
     question_details: List[Dict[str, Any]] = Field(default_factory=list)
     monitoring_events: List[Dict[str, Any]] = Field(default_factory=list)
     completed_at: str = Field(min_length=1, max_length=100)
+    status: Optional[str] = Field(default="completed")
+    termination_reason: Optional[str] = Field(default=None)
+    strikes_detail: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
     @field_validator("interview_id", "candidate", "completed_at")
     @classmethod
